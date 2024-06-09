@@ -1,5 +1,6 @@
 use cpal::platform::Host;
 use cpal::traits::{DeviceTrait, HostTrait};
+use crate::log;
 
 pub struct AudioStream;
 pub struct FormattedAudio;
@@ -15,8 +16,8 @@ pub fn initialize_audio_interface() {
     match input_device {
         Some(device) => {
             match device.name() {
-                Ok(name) => println!("Default input device: {}", name),
-                Err(err) => println!("Failed to get input device name: {}", err),
+                Ok(name) => log::log_message(&format!("Default input device: {}", name)),
+                Err(err) => log::log_message(&format!("Failed to get input device name: {}", err)),
             }
         },
         None => println!("Default input device found"),
@@ -27,8 +28,8 @@ pub fn initialize_audio_interface() {
     match output_device {
         Some(device) => {
             match device.name() {
-                Ok(name) => println!("Default output device: {}", name),
-                Err(err) => println!("Failed to get output device name: {}", err),
+                Ok(name) => log::log_message(&format!("Default output device: {}", name)),
+                Err(err) => log::log_message(&format!("Failed to get output device name: {}", err)),
             }
         },
         None => println!("Default input device found"),

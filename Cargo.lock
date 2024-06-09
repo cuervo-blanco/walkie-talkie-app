@@ -2933,6 +2933,7 @@ dependencies = [
  "chrono",
  "cpal",
  "flutter_rust_bridge",
+ "lazy_static",
  "mdns",
  "rusqlite",
  "serde",
