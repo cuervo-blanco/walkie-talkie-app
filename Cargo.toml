@@ -5,7 +5,22 @@ edition = "2021"
 authors = ["cuervo-blanco"]
 
 [dependencies]
+cpal = "0.15.3"
+webrtc = "0.11.0"
+rusqlite = "0.31.0"
+mdns = "3.0.0"
+serde = "1.0.203"
+serde_json = "1.0.117"
+flutter_rust_bridge = "1.82.6"
 
 
 [lib]
 name = "wt_tools"
+
+[[bin]]
+name="desktop_app"
+path="src/desktop/main.rs"
+
+[[bin]]
+name="mobile_app"
+path="src/mobile/main.rs"
