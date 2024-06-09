@@ -2,5 +2,9 @@
 name = "walkie-talkie-app"
 version = "0.1.0"
 edition = "2021"
+authors = ["cuervo-blanco"]
 
 [dependencies]
+
+[lib]
+name = "wt_tools"
