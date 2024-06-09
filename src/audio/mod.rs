@@ -1,9 +1,38 @@
-// Audio Capture / playback logic
+use cpal::platform::Host;
+use cpal::traits::{DeviceTrait, HostTrait};
+
 pub struct AudioStream;
 pub struct FormattedAudio;
 
 pub fn initialize_audio_interface() {
     // Open communication with the default audio interface
+
+    // Get the default host
+    let host: Host = cpal::default_host();
+
+    // Get the default input device
+    let input_device: Option<cpal::Device> = host.default_input_device();
+    match input_device {
+        Some(device) => {
+            match device.name() {
+                Ok(name) => println!("Default input device: {}", name),
+                Err(err) => println!("Failed to get input device name: {}", err),
+            }
+        },
+        None => println!("Default input device found"),
+    }
+
+    // Get the default output device
+    let output_device: Option<cpal::Device> = host.default_output_device();
+    match output_device {
+        Some(device) => {
+            match device.name() {
+                Ok(name) => println!("Default output device: {}", name),
+                Err(err) => println!("Failed to get output device name: {}", err),
+            }
+        },
+        None => println!("Default input device found"),
+    }
 }
 
 pub fn start_audio_stream() -> AudioStream {

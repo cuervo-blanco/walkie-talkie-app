@@ -2930,6 +2930,7 @@ dependencies = [
 name = "walkie-talkie-app"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "cpal",
  "flutter_rust_bridge",
  "mdns",
