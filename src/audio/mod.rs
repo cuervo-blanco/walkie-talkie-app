@@ -32,7 +32,7 @@ pub fn initialize_audio_interface() {
                 Err(err) => log::log_message(&format!("Failed to get output device name: {}", err)),
             }
         },
-        None => println!("Default input device found"),
+        None => log::log_message(&format!("Default input device found")),
     }
 }
 

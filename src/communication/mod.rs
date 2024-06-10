@@ -1,10 +1,19 @@
 // WebRTC logic, data channels
+use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::data_channel::RTCDataChannel;
 use crate::audio::FormattedAudio;
 
 pub struct Destination;
 
-pub fn initialize_webrtc() {
+pub fn initialize_webrtc() -> RTCPeerConnection {
     // Initialize WebRTC communication
+    todo!()
+}
+
+#[allow(unused_variables)]
+pub fn create_data_channel(pc: &RTCPeerConnection, label: &str) -> RTCDataChannel {
+    // Create a RTCDataChannel
+    todo!()
 }
 
 #[allow(unused_variables)]
