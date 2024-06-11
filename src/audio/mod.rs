@@ -9,8 +9,8 @@ use crate::log;
 const SAMPLE_RATE: u32 = 48000;
 const CHANNELS: Channels = Channels::Mono;
 
+// Open communication with the default audio interface
 pub fn initialize_audio_interface() -> (Option<cpal::Device>, Option<cpal::Device>) {
-    // Open communication with the default audio interface
 
     // Get the default host
     let host: Host = cpal::default_host();
@@ -24,7 +24,7 @@ pub fn initialize_audio_interface() -> (Option<cpal::Device>, Option<cpal::Devic
                 Err(err) => log::log_message(&format!("Failed to get input device name: {}", err)),
             }
         },
-        None => println!("Default input device found"),
+        None => log::log_message(&format!("Default input device found")),
     }
 
     // Get the default output device
@@ -54,7 +54,7 @@ pub fn get_audio_config(device: &cpal::Device) -> cpal::StreamConfig {
     config
 }
 
-pub fn start_input_stream(input_device: &cpal::Device, config: &cpal::StreamConfig) -> cpal::Stream {
+pub fn start_input_stream(input_device: &cpal::Device, config: &cpal::StreamConfig) -> Result<cpal::Stream, cpal::BuildStreamError> {
     // Start the audio input/output stream
 
     let audio_buffer = Arc::new(Mutex::new(Vec::new()));
@@ -68,18 +68,27 @@ pub fn start_input_stream(input_device: &cpal::Device, config: &cpal::StreamConf
                 let mut buffer = buffer_clone.lock().unwrap();
                 buffer.extend_from_slice(data);
                 },
-            |err| eprintln!("An error occured on the input audio stream: {}", err),
+            |err| log::log_message(&format!("An error occured on the input audio stream: {}", err)),
                 Some(timeout)
-                ).expect("Failed to build input stream");
+                );
+    match stream {
+        Ok(s) => {
+            if let Err(err) = s.play() {
+                log::log_message(&format!("Failed to start input stream: {}", err));
+            }
+            Ok(s)
+        }
+        Err(e) => {
+            log::log_message(&format!("Failed to build input stream: {}", e));
+            Err(e)
+        }
+    }
 
-    stream.play().expect("Failed to start input stream");
-    stream
 }
 
 pub fn start_output_stream(output_device: &cpal::Device, config: &cpal::StreamConfig,
-    received_data: Arc<Mutex<Vec<u8>>>) -> cpal::Stream {
+    received_data: Arc<Mutex<Vec<u8>>>) -> Result<cpal::Stream, cpal::BuildStreamError> {
     // Start the audio input/output stream
-
     let output_buffer_clone = Arc::clone(&received_data);
     let stream = output_device.build_output_stream(
         &config,
@@ -96,38 +105,55 @@ pub fn start_output_stream(output_device: &cpal::Device, config: &cpal::StreamCo
                                 }
                             }
                         }
-                        Err(err) => eprintln!("Opus decoding error: {}", err),
+                        Err(err) =>
+                            log::log_message(&format!("Opus decoding error: {}", err)),
                     }
                 }
             },
-        |err| eprintln!("An error occured on the output audio stream: {}", err),
+        |err| log::log_message(&format!("An error occured on the output audio stream: {}", err)),
         None
-    ).unwrap();
+    );
 
-    stream.play().expect("Failed to start output stream");
-    stream
+    match stream {
+        Ok(s) => {
+            if let Err(err) = s.play() {
+                log::log_message(&format!("Failed to start output stream: {}", err));
+            }
+            Ok(s)
+        }
+        Err(e) => {
+            log::log_message(&format!("Failed to build output stream: {}", e));
+            Err(e)
+        }
+    }
 }
 
-#[allow(unused_variables)]
+// Stop the audio stream
 pub fn stop_audio_stream(stream: cpal::Stream) {
-    // Stop the audio stream
+    match stream.pause() {
+        Ok(s) => {
+            // Dropping the stream to release resources
+            drop(s);
+        }
+        Err(e) => {
+            log::log_message(&format!("Unable to pause audio stream: {}", e));
+        }
+    }
 }
 
-#[allow(unused_variables)]
+// Convert audio stream from PCM format to Opus format
 pub fn convert_audio_stream_to_opus(input_stream: &[f32]) -> Result<Vec<u8>, opus::Error> {
-    // Convert audio stream to a desire formar (opus as default)
-
     let mut opus_encoder = Encoder::new(SAMPLE_RATE, CHANNELS, Application::Audio)?;
-    let mut encoded_data = vec![0; 4000]; // Output buffer for Opus encoded data
-
+    let mut encoded_data = vec![0; 4000];
     let len = opus_encoder.encode_float(input_stream, &mut encoded_data)?;
-    Ok(encoded_data[..len].to_vec()) // Return the encoded data as a vector
-
+    Ok(encoded_data[..len].to_vec())
 }
 
+// Decode an audio stream  from Oputs format to PCM format
 pub fn decode_opus_to_pcm(opus_data: &[u8]) -> Result<Vec<f32>, opus::Error> {
     let mut decoder = Decoder::new(SAMPLE_RATE, Channels::Stereo)?;
     let mut pcm_data = vec![0.0; opus_data.len() * 1];
+    // FEC (Forward Error Correction) set to false
     let decoded_samples = decoder.decode_float(opus_data, &mut pcm_data, false)?;
     pcm_data.truncate(decoded_samples * 1);
     Ok(pcm_data)
