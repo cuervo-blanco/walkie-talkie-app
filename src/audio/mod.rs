@@ -9,6 +9,8 @@ use crate::log;
 const SAMPLE_RATE: u32 = 48000;
 const CHANNELS: Channels = Channels::Mono;
 
+pub type FormattedAudio = Result<Vec<u8>, opus::Error>;
+
 // Open communication with the default audio interface
 pub fn initialize_audio_interface() -> (Option<cpal::Device>, Option<cpal::Device>) {
 
@@ -144,14 +146,16 @@ pub fn start_output_stream(output_device: &cpal::Device, config: &cpal::StreamCo
 // Stop the audio stream
 pub fn stop_audio_stream(stream: cpal::Stream) {
     match stream.pause() {
-        Ok(s) => {
+        Ok(_) => {
             // Dropping the stream to release resources
-            drop(s);
+            // Stream will be dropped automatically when it goes out of scope
         }
         Err(e) => {
             log::log_message(&format!("Unable to pause audio stream: {}", e));
         }
     }
+    // Explicitly dropping the stream after attempting to pause it
+    drop(stream);
 }
 
 // Convert audio stream from PCM format to Opus format
