@@ -42,8 +42,14 @@ pub fn initialize_audio_interface() -> (Option<cpal::Device>, Option<cpal::Devic
     (input_device, output_device)
 }
 
-pub fn get_audio_config(device: &cpal::Device) -> cpal::StreamConfig {
-    let config = device.default_output_config().unwrap();
+pub fn get_audio_config(device: &cpal::Device) -> Result<cpal::StreamConfig, cpal::DefaultStreamConfigError> {
+    let config = match device.default_output_config() {
+        Ok(cnfg) => cnfg,
+        Err(e) => {
+            log::log_message(&format!("Unable to get default config: {}", e));
+            return Err(e);
+        }
+    };
 
     let config =  cpal::StreamConfig {
         channels: config.channels(),
@@ -51,7 +57,7 @@ pub fn get_audio_config(device: &cpal::Device) -> cpal::StreamConfig {
         buffer_size: cpal::BufferSize::Fixed(256),
     };
 
-    config
+    Ok(config)
 }
 
 pub fn start_input_stream(input_device: &cpal::Device, config: &cpal::StreamConfig) -> Result<cpal::Stream, cpal::BuildStreamError> {
@@ -65,7 +71,14 @@ pub fn start_input_stream(input_device: &cpal::Device, config: &cpal::StreamConf
     let stream = input_device.build_input_stream(
             &config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                let mut buffer = buffer_clone.lock().unwrap();
+                let mut buffer = match buffer_clone.lock() {
+                Ok(guard) => guard,
+                Err(poisoned_err) => {
+                    let data = poisoned_err.get_ref();
+                    log::log_message(&format!("Unable to guard data: {:?}", data));
+                    return;
+                }
+            };
                 buffer.extend_from_slice(data);
                 },
             |err| log::log_message(&format!("An error occured on the input audio stream: {}", err)),
