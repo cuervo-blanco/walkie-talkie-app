@@ -1,9 +1,6 @@
 // WebRTC logic, data channels
 use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy;
-use webrtc::peer_connection::policy::bundle_policy::RTCBundlePolicy;
-use webrtc::peer_connection::policy::rtcp_mux_policy::RTCRtcpMuxPolicy;
+use webrtc::peer_connection::configuration::{RTCConfiguration, RTCIceServer, RTCIceTransportPolicy, RTCBundlePolicy, RTCRtcpMuxPolicy, RTCSdpSemantics};
 #[allow(unused_imports)]
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 #[allow(unused_imports)]
@@ -44,19 +41,22 @@ async fn create_api() -> Result<webrtc::api::API, Error> {
 
 fn create_rtc_configuration() -> RTCConfiguration {
     RTCConfiguration {
-        // Maybe add STUN server in future
         ice_servers: vec![],
         ice_transport_policy: RTCIceTransportPolicy::All,
-        bundle_policy: RTCBundlePolicy::MaxBundle,
-        rtcp_mux_policy: RTCRtcpMuxPolicy::Require,
+        bundle_policy: ,
+        rtcp_mux_policy: ,
+        peer_identity: ,
+        certificated: ,
         ice_candidate_pool_size: 0,
-        // peer_identity & certificates ommited
-        ..Default::default()
     }
 }
 
 pub async fn create_peer_connection(api: &webrtc::api::API) -> Result<RTCPeerConnection, Error> {
-    let config = create_rtc_configuration();
+    let config = webrtc::peer_connection::configuration::RTCConfiguration {
+        // Add ICE servers or other configurations here
+        ..Default::default()
+    };
+
     let peer_connection = api.new_peer_connection(config).await?;
     Ok(peer_connection)
 }

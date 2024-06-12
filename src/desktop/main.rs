@@ -14,8 +14,16 @@ async fn main() -> std::io::Result<()> {
     // Initialize Audio Interface
     audio::initialize_audio_interface();
 
+    let api = match communication::initialize_webrtc().await {
+        Ok(api) => api,
+        Err(err) => {
+            log::log_message(&format!("Unable to initialize WebRTC: {}", err));
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, err.to_string()))
+        }
+    };
+
     // Initialize the WebRTC connection
-     match communication::initialize_webrtc().await {
+     match communication::create_peer_connection(&api).await {
         Ok(pc) => {
             communication::create_data_channel(&pc, "all");
         },
