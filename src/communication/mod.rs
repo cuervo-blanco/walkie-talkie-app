@@ -2,6 +2,7 @@
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy;
+use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
 use webrtc::peer_connection::policy::bundle_policy::RTCBundlePolicy;
 use webrtc::peer_connection::policy::rtcp_mux_policy::RTCRtcpMuxPolicy;
 #[allow(unused_imports)]
@@ -21,7 +22,10 @@ async fn create_media_engine() -> Result<MediaEngine, webrtc::Error>  {
     let mut media_engine = MediaEngine::default();
     // Register default codecs including Opus
     match media_engine.register_default_codecs() {
-        Ok(_) => Ok(media_engine),
+        Ok(_) => {
+            log::log_message(&format!("Successfuly registred default codecs"));
+            Ok(media_engine)
+        },
         Err(e) => {
             log::log_message(&format!("Error encountered registring default codecs: {}", e));
             Err(e)
@@ -31,7 +35,10 @@ async fn create_media_engine() -> Result<MediaEngine, webrtc::Error>  {
 
 async fn create_api() -> Result<webrtc::api::API, Error> {
     let media_engine = match create_media_engine().await {
-        Ok(engine) => engine,
+        Ok(engine) => {
+            log::log_message(&format!("Successful creation of Media Engine"));
+            engine
+        },
         Err(e) => {
             log::log_message(&format!("Error creating media engine: {}", e));
             return Err(e)
@@ -59,6 +66,39 @@ pub async fn create_peer_connection(api: &webrtc::api::API) -> Result<RTCPeerCon
     let config = create_rtc_configuration();
     let peer_connection = api.new_peer_connection(config).await?;
     Ok(peer_connection)
+}
+
+#[allow(dead_code)]
+async fn create_offer(peer_connection: &RTCPeerConnection) -> Result<String, Error> {
+    // First step when communicating with peer
+    let offer = peer_connection.create_offer(None).await?;
+
+    peer_connection.set_local_description(offer.clone()).await?;
+
+    Ok(offer.sdp)
+}
+
+#[allow(dead_code)]
+async fn create_answer(peer_connection: &RTCPeerConnection) -> Result<String, Error> {
+    // Response to peer upon receiving offer (sends answer)
+    let answer = peer_connection.create_answer(None).await?;
+
+    peer_connection.set_local_description(answer.clone()).await?;
+
+    Ok(answer.sdp)
+}
+
+#[allow(dead_code)]
+async fn set_remote_description(peer_connection: &RTCPeerConnection, received_offer: RTCSessionDescription) -> Result<(), Error> {
+    // Receives offer and sets it as the remote description
+    peer_connection.set_remote_description(received_offer).await?;
+    Ok(())
+}
+#[allow(dead_code)]
+async fn add_ice_candidate(peer_connection: &RTCPeerConnection, candidate: RTCIceCandidateInit) -> Result<(), Error> {
+    // Adds Received ICE candidate
+    peer_connection.add_ice_candidate(candidate).await?;
+    Ok(())
 }
 
 #[allow(dead_code)]
