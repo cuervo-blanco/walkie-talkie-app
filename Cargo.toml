@@ -17,6 +17,9 @@ chrono = "0.4.38"
 lazy_static = "1.4.0"
 opus = "0.3.0"
 tokio = "1.38.0"
+futures = "0.3.30"
+tokio-tungstenite = "0.23.0"
+
 
 [lib]
 name = "wt_tools"
