@@ -16,8 +16,59 @@ use webrtc::api::APIBuilder;
 use webrtc::Error;
 use crate::audio::FormattedAudio;
 use crate::log;
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 pub struct Destination;
+
+pub struct WebRTCModule {
+    api: webrtc::api::API,
+}
+
+impl WebRTCModule {
+    pub async fn new() -> Result<Self, webrtc::Error> {
+        // Initialize WebRTC communication
+        let api = create_api().await?;
+        // Additional WebRTC logic here (e.g creating offers/answers, adding tracks, etc.)
+        Ok(Self{api})
+    }
+    pub async fn create_peer_connection(api: &webrtc::api::API) -> Result<RTCPeerConnection, Error> {
+        let config = create_rtc_configuration();
+        let peer_connection = api.new_peer_connection(config).await?;
+        Ok(peer_connection)
+    }
+    pub async fn signaling_loop(&self, signaling_url: &str, peer_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let (mut ws_stream, _) = connect_async(signaling_url).await.expect("Failed to connect");
+
+        // Register with the signaling server
+        ws_stream.send(Message::Text(format!("register:{}", peer_id))).await?;
+
+        // Create an offer and send it to the signaling server
+        let offer_sdp = "offer_sdp_placeholder"; // Replace with actual offer SDP
+        ws_stream.send(Message::Text(format!("{}:{}", "target_peer_id", offer_sdp))).await?;
+
+        // Recieve messages from the signaling server
+        while let Some(message) = ws_stream.next().await{
+            match message? {
+                Message::Text(text) => {
+                    if text.starts_with("offer:") {
+                        let sdp = &text[6..];
+                        // Set remote description and create and answer
+                        let answer_sdp = "answer_sdp_placeholder";
+                        ws_stream.send(Message::Text(format!("{}:{}", "target_peer_id", answer_sdp))).await?;
+                    } else if text.starts_with("answer:") {
+                        let sdp = &text[7..];
+                        // Set remote description
+                    } else if text.starts_with("candidate:"){
+                        let candidate = &text[10..];
+                        // Add ICE Candidate
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
 
 async fn create_media_engine() -> Result<MediaEngine, webrtc::Error>  {
     let mut media_engine = MediaEngine::default();
@@ -63,11 +114,6 @@ fn create_rtc_configuration() -> RTCConfiguration {
     }
 }
 
-pub async fn create_peer_connection(api: &webrtc::api::API) -> Result<RTCPeerConnection, Error> {
-    let config = create_rtc_configuration();
-    let peer_connection = api.new_peer_connection(config).await?;
-    Ok(peer_connection)
-}
 
 #[allow(dead_code)]
 async fn create_offer(peer_connection: &RTCPeerConnection) -> Result<String, Error> {
@@ -114,12 +160,6 @@ async fn handle_peer_connection_events(peer_connection: &RTCPeerConnection) {
     // Additional event handlers can be added here
 }
 
-pub async fn initialize_webrtc() -> Result<webrtc::api::API, Error> {
-    // Initialize WebRTC communication
-    let api = create_api().await?;
-    // Additional WebRTC logic here (e.g creating offers/answers, adding tracks, etc.)
-    Ok(api)
-}
 
 #[allow(unused_variables)]
 pub fn create_data_channel(pc: &RTCPeerConnection, label: &str) -> RTCDataChannel {
