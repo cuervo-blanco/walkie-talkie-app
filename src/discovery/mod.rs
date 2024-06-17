@@ -15,7 +15,7 @@ pub fn broadcast_service(room_name: &str, creator_device_id: &str) {
 }
 
 #[allow(unused_variables)]
-pub fn discover_services(service_type: &str) -> Receiver<mdns_sd::ServiceEvent> {
+pub fn discover_networks(service_type: &str) -> Receiver<mdns_sd::ServiceEvent> {
     // Return receiver for discovered services
     todo!()
 }
@@ -24,5 +24,8 @@ pub fn get_available_channels() -> Vec<Channel> {
     // Return a list of available channels
     // Maybe consider returning Vec<Strig> instead of Channel...
     // since channels are created in the communication module
+    todo!()
+}
+pub fn select_network() {
     todo!()
 }

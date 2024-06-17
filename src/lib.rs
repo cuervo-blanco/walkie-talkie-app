@@ -5,4 +5,3 @@ pub mod db;
 pub mod metadata;
 pub mod log;
 pub mod websocket;
-pub mod network_selection;

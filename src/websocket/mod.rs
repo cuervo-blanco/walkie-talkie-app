@@ -47,6 +47,10 @@ impl WebSocketStream {
         }
         Ok(())
     }
+     pub async fn get_peer_list(&self) -> Vec<String> {
+        let peers = self.peer_map.lock().await;
+        peers.keys().cloned().collect::<Vec<String>>()
+    }
 }
 
 async fn handle_connection(peer_map: PeerMap, raw_stream: tokio::net::TcpStream) {
@@ -68,7 +72,20 @@ async fn handle_connection(peer_map: PeerMap, raw_stream: tokio::net::TcpStream)
                         if text.starts_with("register:") {
                             let peer_id = text[9..].to_string();
                             let mut peers = peer_map.lock().await;
-                            peers.insert(peer_id, write.clone());
+                            peers.insert(peer_id.clone(), write.clone());
+                            // Send the list of peers to the newly connected peer
+                            let peer_list = peers.keys().cloned().collect::<Vec<String>>().join(",");
+                            let new_peer = peers.get(&peer_id).unwrap();
+                            let mut new_peer = new_peer.lock().await;
+                            new_peer.send(Message::Text(peer_list)).await.expect("Failed to send peer list");
+                            // Notify existing peers about the new peer
+                            for(id, peer) in peers.iter() {
+                                if id != &peer_id {
+                                    let mut peer = peer.lock().await;
+                                    peer.send(Message::Text(format!("new_peer:{}", peer_id))).await.expect("Failed to notify peers about new peer");
+                                }
+                            }
+
                         } else {
                             let parts: Vec<&str> = text.splitn(2, ":").collect();
                             if parts.len() == 2 {
