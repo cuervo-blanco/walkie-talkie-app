@@ -14,6 +14,7 @@ use webrtc::data_channel::RTCDataChannel;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
 use webrtc::Error;
+use futures::{SinkExt, StreamExt};
 use crate::audio::FormattedAudio;
 use crate::log;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
