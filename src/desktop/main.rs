@@ -50,6 +50,7 @@ async fn main() -> std::io::Result<()> {
             let output_stream = audio::start_output_stream(&output_device, &output_config, received_data).expect("Failed to start output stream");
 
             // Simulate sending audio data
+            let send_audio_module = webrtc_module.clone();
             tokio::spawn(async move {
                 loop {
                     // Encode and send audio data
@@ -62,9 +63,15 @@ async fn main() -> std::io::Result<()> {
                 }
             });
 
+            let mut audio_receiver = webrtc_module.receive_audio().await;
             tokio::spawn(async move {
-                webrtc_module.receive_audio(received_data).await.expect("Failed to receive audio");
+                while let Some(audio_data) = audio_receiver.next().await {
+                    // handle playback of received audio data
+                    let mut received_buffer = received_data.lock().unwrap();
+                    *received_buffer = audio_data;
+                }
             });
+
 
             // Keep the main application running
             tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
