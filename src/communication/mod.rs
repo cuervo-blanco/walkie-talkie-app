@@ -11,6 +11,7 @@ use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 #[allow(unused_imports)]
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::data_channel::RTCDataChannel;
+use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
 use webrtc::Error;
@@ -18,12 +19,16 @@ use futures::{SinkExt, StreamExt};
 use crate::audio::FormattedAudio;
 use crate::log;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use std::sync::{Arc, Mutex};
+use bytes::Bytes;
+use std::collections::HashMap;
 
 pub struct Destination;
 
 pub struct WebRTCModule {
     api: webrtc::api::API,
-    peer_connections: Vec<RTCPeerConnection>,
+    peer_connections: HashMap<String, RTCPeerConnection>,
+    audio_data_channels: Vec<RTCDataChannel>,
 }
 
 impl WebRTCModule {
@@ -31,19 +36,22 @@ impl WebRTCModule {
         // Initialize WebRTC communication
         let api = create_api().await?;
         // Additional WebRTC logic here (e.g creating offers/answers, adding tracks, etc.)
-        Ok(Self{api, peer_connections: Vec::new() })
+        Ok(Self{
+            api,
+            peer_connections: HashMap::new(),
+            audio_data_channels: Vec::new(),
+        })
     }
     async fn find_peer_with_no_remote_description(&mut self) -> Option<&mut RTCPeerConnection> {
-        for pc in self.peer_connections.iter_mut() {
+        for (_, pc) in self.peer_connections.iter_mut() {
             if pc.remote_description().await.is_none() {
                 return Some(pc);
             }
         }
         None
     }
-
     async fn find_peer_with_remote_description(&mut self) -> Option<&mut RTCPeerConnection>{
-        for pc in self.peer_connections.iter_mut() {
+        for (_, pc) in self.peer_connections.iter_mut() {
             if pc.remote_description().await.is_some() {
                 return Some(pc);
             }
@@ -62,8 +70,8 @@ impl WebRTCModule {
             for peer in peers {
                 let peer_connection = create_peer_connection(&self.api).await?;
                 let offer_sdp = create_offer(&peer_connection).await?;
-                self.peer_connections.push(peer_connection);
-                ws_stream.send(Message::Text(format!("offer:{}:{}", peer, offer_sdp))).await?;
+                self.peer_connections.insert(peer.clone(), peer_connection);
+                ws_stream.send(Message::Text(format!("{}:offer:{}:{}", peer_id, peer, offer_sdp))).await?;
             }
         }
         // Recieve messages from the signaling server
@@ -75,52 +83,75 @@ impl WebRTCModule {
                         //Create an offer for the new peer
                         let peer_connection = create_peer_connection(&self.api).await?;
                         let offer_sdp = create_offer(&peer_connection).await?;
-                        self.peer_connections.push(peer_connection);
-                        ws_stream.send(Message::Text(format!("offer:{}:{}", new_peer_id, offer_sdp))).await?;
+                        self.peer_connections.insert(new_peer_id.to_string(), peer_connection);
+                        ws_stream.send(Message::Text(format!("{}:offer:{}:{}", peer_id, new_peer_id, offer_sdp))).await?;
                     } else if text.starts_with("offer:") {
                         let parts: Vec<&str> = text.splitn(3, ':').collect();
-                        let target_peer_id = parts[1];
-                        let sdp = parts[2];
-                        let peer_connection = create_peer_connection(&self.api).await?;
-                        let _ = set_remote_description(&peer_connection, webrtc::peer_connection::sdp::session_description::RTCSessionDescription::offer(sdp.to_string())?).await;
-                        let answer_sdp = create_answer(&peer_connection).await?;
-                        self.peer_connections.push(peer_connection);
-                        ws_stream.send(Message::Text(format!("{}:{}", target_peer_id, answer_sdp))).await?;
-                    } else if text.starts_with("answer:") {
-                        let parts: Vec<&str> = text.splitn(3, ':').collect();
-                        let sdp = parts[2];
-                        // Find the peer connection that this answer corresponds to and set the
-                        // remote description
-                        if let Some(peer_connection) = self.find_peer_with_no_remote_description().await {
-                            let _ = set_remote_description(&peer_connection, RTCSessionDescription::answer(sdp.to_string())?).await;
-                        }
-                    } else if text.starts_with("candidate:"){
-                        let parts: Vec<&str> = text.splitn(3, ':').collect();
-                        let candidate = parts[2];
-                        let ice_candidate = RTCIceCandidateInit {
-                            candidate: candidate.to_string(),
-                            sdp_mid: None,
-                            sdp_mline_index: None,
-                            username_fragment: None,
-                        };
-                        // Add ICE Candidate to the peer_connection
-                        if let Some(peer_connection) = self.find_peer_with_remote_description().await {
-                            add_ice_candidate(peer_connection, ice_candidate).await?;
-                        }
+                        let message_type = parts[0];
+                        let remote_peer_id = parts[1];
+                        let sdp_or_candidate = parts[2];
 
+                        match message_type {
+                            "offer" => {
+                                let peer_connection = create_peer_connection(&self.api).await?;
+                                set_remote_description(&peer_connection, RTCSessionDescription::offer(sdp_or_candidate.to_string())?).await?;
+                                let answer_sdp = create_answer(&peer_connection).await?;
+                                self.peer_connections.insert(remote_peer_id.to_string(), peer_connection);
+                                ws_stream.send(Message::Text(format!("{}:answer:{}:{}", remote_peer_id, peer_id, answer_sdp))).await?;
+                            }
+                            "answer" => {
+                                if let Some(peer_connection) = self.find_peer_with_no_remote_description().await {
+                                    set_remote_description(&peer_connection, RTCSessionDescription::answer(sdp_or_candidate.to_string())?).await?;
+                                }
+                            }
+                            "candidate" => {
+                                let ice_candidate = RTCIceCandidateInit {
+                                    candidate: sdp_or_candidate.to_string(),
+                                    sdp_mid: None,
+                                    sdp_mline_index: None,
+                                    username_fragment: None,
+                                };
+                                // Add ICE Candidate to the peer_connection
+                                if let Some(peer_connection) = self.find_peer_with_remote_description().await {
+                                    add_ice_candidate(peer_connection, ice_candidate).await?;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
-                }
+                },
                 _ => {}
             }
         }
         Ok(())
     }
     #[allow(unused_variables)]
-    pub async fn send_audio(&self, audio_data: FormattedAudio, destination: Destination) -> Result<(), Box<dyn std::error::Error>>{
-        // Send audio to the specified destination using WebRTC
-        for peer_connection in &self.peer_connections{
-            // Use data channels or RTP to send audio data
-            // Here you would implement the actual sending of audio data
+    pub async fn send_audio(&self, audio_data: FormattedAudio) -> Result<(), Box<dyn std::error::Error>>{
+        // Check if the audio data is valid
+        if let Ok(data) = audio_data {
+            let bytes = Bytes::from(data);
+            // Send audio to the specified destination using WebRTC
+            for data_channel in &self.audio_data_channels {
+                if let Ok(_) = data_channel.send(&bytes).await {
+                    log::log_message("Audio data sent successfully");
+                } else {
+                    log::log_message("Failed to send audio data");
+                }
+            }
+        } else {
+            log::log_message("Invalid audio data");
+        }
+        Ok(())
+    }
+    pub async fn receive_audio(&self, received_data: Arc<Mutex<Vec<u8>>>) -> FormattedAudio {
+        // Receive audio from WebRTC and return it in a format suitable for a playback
+        for data_channel in &self.audio_data_channels {
+            let received_data_clone = Arc::clone(&received_data);
+            data_channel.on_message(Box::new(move |msg| {
+                let mut buffer = received_data_clone.lock().unwrap();
+                buffer.extend_from_slice(&msg.data);
+                Box::pin(async {})
+            }));
         }
         Ok(())
     }
@@ -170,6 +201,12 @@ fn create_rtc_configuration() -> RTCConfiguration {
 async fn create_peer_connection(api: &webrtc::api::API) -> Result<RTCPeerConnection, Error> {
     let config = create_rtc_configuration();
     let peer_connection = api.new_peer_connection(config).await?;
+    // Create a data channel for audio
+    let data_channel_init = RTCDataChannelInit {
+        ordered: Some(true),
+        ..Default::default()
+    };
+    let data_channel = peer_connection.create_data_channel("audio", Some(data_channel_init)).await?;
     Ok(peer_connection)
 }
 async fn create_offer(peer_connection: &RTCPeerConnection) -> Result<String, Error> {
@@ -210,15 +247,6 @@ async fn handle_peer_connection_events(peer_connection: &RTCPeerConnection) {
     // Additional event handlers can be added here
 }
 #[allow(unused_variables)]
-pub fn create_data_channel(pc: &RTCPeerConnection, label: &str) -> RTCDataChannel {
-    // Create a RTCDataChannel
-    todo!()
-}
-#[allow(unused_variables)]
 pub fn set_destination(dest: Destination) {
     // Set the destination for audio streaming
-}
-pub fn receive_audio() -> FormattedAudio {
-    // Receive audio from WebRTC and return it in a format suitable for a playback
-    todo!()
 }

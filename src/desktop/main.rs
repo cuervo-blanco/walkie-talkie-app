@@ -57,9 +57,13 @@ async fn main() -> std::io::Result<()> {
                     if !buffer.is_empty() {
                         // Repalce with actual WebRTC send function
                         let opus_data = audio::convert_audio_stream_to_opus(&buffer).expect("Failed to encode audio");
-                        webrtc_module.send_audio(opus_data).await.expect("Failed to send audio");
+                        webrtc_module.send_audio(Ok(opus_data)).await.expect("Failed to send audio");
                     }
                 }
+            });
+
+            tokio::spawn(async move {
+                webrtc_module.receive_audio(received_data).await.expect("Failed to receive audio");
             });
 
             // Keep the main application running

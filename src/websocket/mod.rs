@@ -87,10 +87,10 @@ async fn handle_connection(peer_map: PeerMap, raw_stream: tokio::net::TcpStream)
                             }
 
                         } else {
-                            let parts: Vec<&str> = text.splitn(2, ":").collect();
-                            if parts.len() == 2 {
+                            let parts: Vec<&str> = text.splitn(4, ":").collect();
+                            if parts.len() == 4 {
                                 let target_peer_id = parts[0];
-                                let message_content = parts[1];
+                                let message_content = format!("{}:{}:{}", parts[1], parts[2], parts[3]);
 
                                 let peers = peer_map.lock().await;
                                 if let Some(peer) = peers.get(target_peer_id) {
