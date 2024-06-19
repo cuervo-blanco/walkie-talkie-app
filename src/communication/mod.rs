@@ -6,7 +6,8 @@ use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc;
 use std::collections::HashMap;
 #[allow(unused_imports)]
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
@@ -49,18 +50,42 @@ impl WebRTCModule {
     }
     pub async fn signaling_loop(&mut self, signaling_url: &str, peer_id: &str) -> Result<(), Box<dyn std::error::Error>> {
         // The connect_async simply connects to a given url which in this case is of ws:// type
-        let (mut ws_stream, _) = connect_async(signaling_url).await.expect("Failed to connect");
+        let (ws_stream, _) = connect_async(signaling_url).await.expect("Failed to connect");
+        let (ws_sink, mut ws_stream) = ws_stream.split();
+
+        let ws_sink = Arc::new(Mutex::new(ws_sink));
+
+        {
+            let mut sink = ws_sink.lock().await;
+            sink.send(Message::Text(format!("register:{}", peer_id))).await?;
+        }
+
         // Register with the signaling server
-        ws_stream.send(Message::Text(format!("register:{}", peer_id))).await?;
+
+        let (signaling_sender, mut signaling_receiver) = mpsc::channel(100);
+        let ws_sink_clone = Arc::clone(&ws_sink);
+
+        // handle outgoing signaling messages
+        tokio::spawn(async move {
+            while let Some(message) = signaling_receiver.next().await{
+                let mut sink = ws_sink_clone.lock().await;
+                if let Err(e) = sink.send(message).await {
+                    log::log_message(&format!("Error sending message: {}", e));
+                }
+            }
+        });
+
         // Receive initial list of peers in the channel
         if let Some(Ok(Message::Text(peer_list))) = ws_stream.next().await {
             let peers: Vec<String> = peer_list.split(',').map(|s| s.to_string()).collect();
             // Create an offer for each peer and send it
             for peer in peers {
-                let peer_connection = create_peer_connection(&self.api, &mut self.audio_data_channels).await?;
+                let peer_connection = create_peer_connection(&self.api, &mut self.audio_data_channels, signaling_sender.clone(), peer_id.to_string(), peer.clone().to_string()).await?;
                 let offer_sdp = create_offer(&peer_connection).await?;
                 self.peer_connections.insert(peer.clone(), peer_connection);
-                ws_stream.send(Message::Text(format!("{}:offer:{}:{}", peer, peer_id, offer_sdp))).await?;
+
+                let mut sink = ws_sink.lock().await;
+                sink.send(Message::Text(format!("{}:offer:{}:{}", peer, peer_id, offer_sdp))).await?;
             }
         }
         // Recieve messages from the signaling server
@@ -70,10 +95,11 @@ impl WebRTCModule {
                     if text.starts_with("new_peer:") {
                         let new_peer_id = &text[9..];
                         //Create an offer for the new peer
-                        let peer_connection = create_peer_connection(&self.api, &mut self.audio_data_channels).await?;
+                        let peer_connection = create_peer_connection(&self.api, &mut self.audio_data_channels, signaling_sender.clone(), peer_id.to_string(), new_peer_id.to_string()).await?;
                         let offer_sdp = create_offer(&peer_connection).await?;
                         self.peer_connections.insert(new_peer_id.to_string(), peer_connection);
-                        ws_stream.send(Message::Text(format!("{}:offer:{}:{}", new_peer_id, peer_id, offer_sdp))).await?;
+                        let mut sink = ws_sink.lock().await;
+                        sink.send(Message::Text(format!("{}:offer:{}:{}", new_peer_id, peer_id, offer_sdp))).await?;
                     } else if text.starts_with("offer:") {
                         let parts: Vec<&str> = text.splitn(3, ':').collect();
                         let message_type = parts[0];
@@ -82,11 +108,12 @@ impl WebRTCModule {
 
                         match message_type {
                             "offer" => {
-                                let peer_connection = create_peer_connection(&self.api, &mut self.audio_data_channels).await?;
+                                let peer_connection = create_peer_connection(&self.api, &mut self.audio_data_channels, signaling_sender.clone(), peer_id.to_string(), remote_peer_id.to_string()).await?;
                                 set_remote_description(&peer_connection, RTCSessionDescription::offer(sdp_or_candidate.to_string())?).await?;
                                 let answer_sdp = create_answer(&peer_connection).await?;
                                 self.peer_connections.insert(remote_peer_id.to_string(), peer_connection);
-                                ws_stream.send(Message::Text(format!("{}:answer:{}:{}", remote_peer_id, peer_id, answer_sdp))).await?;
+                                let mut sink = ws_sink.lock().await;
+                                sink.send(Message::Text(format!("{}:answer:{}:{}", remote_peer_id, peer_id, answer_sdp))).await?;
                             }
                             "answer" => {
                                 if let Some(peer_connection) = self.peer_connections.get_mut(remote_peer_id) {
@@ -115,7 +142,7 @@ impl WebRTCModule {
         Ok(())
     }
     pub async fn send_audio(&self, audio_data: FormattedAudio) -> Result<(), Box<dyn std::error::Error>>{
-        let active = *self.audio_sending_active.lock().unwrap();
+        let active = *self.audio_sending_active.lock().await;
         if !active {
             return Ok(());
         }
@@ -139,45 +166,64 @@ impl WebRTCModule {
         let (sender, receiver) = mpsc::channel(100); // Channel to send audio data
 
         for data_channel in &self.audio_data_channels {
-            let mut sender_clone = sender.clone();
+            let sender_clone = sender.clone();
             let data_channel_clone = Arc::clone(data_channel);
             let active = self.audio_receiving_active.clone();
+
             data_channel_clone.on_message(Box::new(move |msg: DataChannelMessage| {
-                let active = *active.lock().unwrap();
-                if !active {
-                    return Box::pin(async {});
-                }
-                let data = msg.data.to_vec();
-                // Send the data through the channel
-                if let Err(_) = sender_clone.try_send(data) {
-                    log::log_message("Failed to send received audio data");
-                }
+                let mut sender_clone = sender_clone.clone();
+                let active = active.clone();
+                tokio::spawn(async move {
+                    let active = *active.lock().await;
+                    if !active {
+                        return;
+                    }
+                    let data = msg.data.to_vec();
+                    // Send the data through the channel
+                    if let Err(_) = sender_clone.try_send(data) {
+                        log::log_message("Failed to send received audio data");
+                    }
+                });
                 Box::pin(async {})
             }));
         }
         receiver
     }
-    pub fn stop_sending_audio(&self) {
-        let mut active = self.audio_sending_active.lock().unwrap();
+    pub async fn stop_sending_audio(&self) {
+        let mut active = self.audio_sending_active.lock().await;
         *active = false;
     }
-    pub fn resume_sending_audio(&self) {
-        let mut active = self.audio_sending_active.lock().unwrap();
+    pub async fn resume_sending_audio(&self) {
+        let mut active = self.audio_sending_active.lock().await;
         *active = true;
     }
-    pub fn stop_receiving_audio(&self) {
-        let mut active = self.audio_receiving_active.lock().unwrap();
+    pub async fn stop_receiving_audio(&self) {
+        let mut active = self.audio_receiving_active.lock().await;
         *active = false;
     }
-    pub fn resume_receiving_audio(&self) {
-        let mut active = self.audio_receiving_active.lock().unwrap();
+    pub async fn resume_receiving_audio(&self) {
+        let mut active = self.audio_receiving_active.lock().await;
         *active = true;
     }
 }
 
-async fn create_peer_connection(api: &webrtc::api::API, audio_data_channels: &mut Vec<Arc<RTCDataChannel>>) -> Result<RTCPeerConnection, Error> {
+async fn create_peer_connection(api: &webrtc::api::API, audio_data_channels: &mut Vec<Arc<RTCDataChannel>>, signaling_sender: mpsc::Sender<Message>, peer_id: String, remote_peer_id: String) -> Result<RTCPeerConnection, Error> {
     let config = create_rtc_configuration();
     let peer_connection = api.new_peer_connection(config).await?;
+
+    // Handle ICE candidates
+    let remote_peer_id_clone = remote_peer_id.clone();
+    let peer_id_clone = peer_id.clone();
+    let signaling_sender_clone = signaling_sender.clone();
+    peer_connection.on_ice_candidate(Box::new(move |candidate: Option<RTCIceCandidate>| {
+        if let Some(candidate) = candidate {
+            let candidate_string = candidate.to_string();
+            let message = Message::Text(format!("{}:candidate:{}:{}", remote_peer_id_clone, peer_id_clone, candidate_string));
+            let _ = signaling_sender_clone.clone().try_send(message);
+        }
+        Box::pin(async {})
+    }));
+
     // Create a data channel for audio
     let data_channel_init = RTCDataChannelInit {
         ordered: Some(true),
