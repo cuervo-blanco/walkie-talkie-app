@@ -1,29 +1,28 @@
 // WebRTC logic, data channels
-use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy;
-#[allow(unused_imports)]
-use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
-use webrtc::peer_connection::policy::bundle_policy::RTCBundlePolicy;
-use webrtc::peer_connection::policy::rtcp_mux_policy::RTCRtcpMuxPolicy;
-#[allow(unused_imports)]
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-#[allow(unused_imports)]
-use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
-use webrtc::data_channel::RTCDataChannel;
-use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
-use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::api::media_engine::MediaEngine;
-use webrtc::api::APIBuilder;
-use webrtc::Error;
-use futures::{SinkExt, StreamExt};
-use futures::channel::mpsc;
+use bytes::Bytes;
 use crate::audio::FormattedAudio;
 use crate::log;
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
-use std::sync::{Arc, Mutex};
-use bytes::Bytes;
+use futures::{SinkExt, StreamExt};
+use futures::channel::mpsc;
 use std::collections::HashMap;
+#[allow(unused_imports)]
+use std::sync::{Arc, Mutex};
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use webrtc::api::media_engine::MediaEngine;
+use webrtc::api::APIBuilder;
+use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
+use webrtc::data_channel::data_channel_message::DataChannelMessage;
+use webrtc::data_channel::RTCDataChannel;
+use webrtc::Error;
+#[allow(unused_imports)]
+use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
+use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
+use webrtc::peer_connection::policy::bundle_policy::RTCBundlePolicy;
+use webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy;
+use webrtc::peer_connection::policy::rtcp_mux_policy::RTCRtcpMuxPolicy;
+use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
 pub struct Destination;
 
@@ -31,6 +30,8 @@ pub struct WebRTCModule {
     api: webrtc::api::API,
     peer_connections: HashMap<String, RTCPeerConnection>,
     audio_data_channels: Vec<Arc<RTCDataChannel>>,
+    audio_sending_active: Arc<Mutex<bool>>,
+    audio_receiving_active: Arc<Mutex<bool>>
 }
 
 impl WebRTCModule {
@@ -42,6 +43,8 @@ impl WebRTCModule {
             api,
             peer_connections: HashMap::new(),
             audio_data_channels: Vec::new(),
+            audio_sending_active: Arc::new(Mutex::new(true)),
+            audio_receiving_active: Arc::new(Mutex::new(true)),
         })
     }
     pub async fn signaling_loop(&mut self, signaling_url: &str, peer_id: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -57,7 +60,7 @@ impl WebRTCModule {
                 let peer_connection = create_peer_connection(&self.api, &mut self.audio_data_channels).await?;
                 let offer_sdp = create_offer(&peer_connection).await?;
                 self.peer_connections.insert(peer.clone(), peer_connection);
-                ws_stream.send(Message::Text(format!("{}:offer:{}:{}", peer_id, peer, offer_sdp))).await?;
+                ws_stream.send(Message::Text(format!("{}:offer:{}:{}", peer, peer_id, offer_sdp))).await?;
             }
         }
         // Recieve messages from the signaling server
@@ -70,7 +73,7 @@ impl WebRTCModule {
                         let peer_connection = create_peer_connection(&self.api, &mut self.audio_data_channels).await?;
                         let offer_sdp = create_offer(&peer_connection).await?;
                         self.peer_connections.insert(new_peer_id.to_string(), peer_connection);
-                        ws_stream.send(Message::Text(format!("{}:offer:{}:{}", peer_id, new_peer_id, offer_sdp))).await?;
+                        ws_stream.send(Message::Text(format!("{}:offer:{}:{}", new_peer_id, peer_id, offer_sdp))).await?;
                     } else if text.starts_with("offer:") {
                         let parts: Vec<&str> = text.splitn(3, ':').collect();
                         let message_type = parts[0];
@@ -112,6 +115,10 @@ impl WebRTCModule {
         Ok(())
     }
     pub async fn send_audio(&self, audio_data: FormattedAudio) -> Result<(), Box<dyn std::error::Error>>{
+        let active = *self.audio_sending_active.lock().unwrap();
+        if !active {
+            return Ok(());
+        }
         // Check if the audio data is valid
         if let Ok(data) = audio_data {
             let bytes = Bytes::from(data);
@@ -134,7 +141,12 @@ impl WebRTCModule {
         for data_channel in &self.audio_data_channels {
             let mut sender_clone = sender.clone();
             let data_channel_clone = Arc::clone(data_channel);
+            let active = self.audio_receiving_active.clone();
             data_channel_clone.on_message(Box::new(move |msg: DataChannelMessage| {
+                let active = *active.lock().unwrap();
+                if !active {
+                    return Box::pin(async {});
+                }
                 let data = msg.data.to_vec();
                 // Send the data through the channel
                 if let Err(_) = sender_clone.try_send(data) {
@@ -144,6 +156,22 @@ impl WebRTCModule {
             }));
         }
         receiver
+    }
+    pub fn stop_sending_audio(&self) {
+        let mut active = self.audio_sending_active.lock().unwrap();
+        *active = false;
+    }
+    pub fn resume_sending_audio(&self) {
+        let mut active = self.audio_sending_active.lock().unwrap();
+        *active = true;
+    }
+    pub fn stop_receiving_audio(&self) {
+        let mut active = self.audio_receiving_active.lock().unwrap();
+        *active = false;
+    }
+    pub fn resume_receiving_audio(&self) {
+        let mut active = self.audio_receiving_active.lock().unwrap();
+        *active = true;
     }
 }
 
