@@ -30,7 +30,7 @@ pub struct Destination;
 pub struct WebRTCModule {
     api: webrtc::api::API,
     peer_connections: HashMap<String, RTCPeerConnection>,
-    audio_data_channels: Vec<Arc<RTCDataChannel>>,
+    audio_data_channels: HashMap<String, Vec<Arc<RTCDataChannel>>>,
     audio_sending_active: Arc<Mutex<bool>>,
     audio_receiving_active: Arc<Mutex<bool>>
 }
@@ -43,11 +43,22 @@ impl WebRTCModule {
         Ok(Self{
             api,
             peer_connections: HashMap::new(),
-            audio_data_channels: Vec::new(),
+            audio_data_channels: HashMap::new(),
             audio_sending_active: Arc::new(Mutex::new(true)),
             audio_receiving_active: Arc::new(Mutex::new(true)),
         })
     }
+    pub async fn join_group(&mut self, group: &str, data_channel: Arc<RTCDataChannel>) {
+        self.audio_data_channels.entry(group.to_string())
+            .or_insert_with(Vec::new)
+            .push(data_channel);
+    }
+    pub async fn leave_group(&mut self, group: &str, data_channel: Arc<RTCDataChannel>) {
+        if let Some(data_channels) = self.audio_data_channels.get_mut(group) {
+            data_channels.retain(|dc| !Arc::ptr_eq(dc, &data_channel));
+        }
+    }
+
     pub async fn signaling_loop(&mut self, signaling_url: &str, peer_id: &str) -> Result<(), Box<dyn std::error::Error>> {
         // The connect_async simply connects to a given url which in this case is of ws:// type
         let (ws_stream, _) = connect_async(signaling_url).await.expect("Failed to connect");
@@ -141,7 +152,7 @@ impl WebRTCModule {
         }
         Ok(())
     }
-    pub async fn send_audio(&self, audio_data: FormattedAudio) -> Result<(), Box<dyn std::error::Error>>{
+    pub async fn send_audio(&self, audio_data: FormattedAudio, group: &str) -> Result<(), Box<dyn std::error::Error>>{
         let active = *self.audio_sending_active.lock().await;
         if !active {
             return Ok(());
@@ -150,11 +161,13 @@ impl WebRTCModule {
         if let Ok(data) = audio_data {
             let bytes = Bytes::from(data);
             // Send audio to the specified destination using WebRTC
-            for data_channel in &self.audio_data_channels {
-                if let Ok(_) = data_channel.send(&bytes).await {
-                    log::log_message("Audio data sent successfully");
-                } else {
-                    log::log_message("Failed to send audio data");
+            if let Some(data_channels) = self.audio_data_channels.get(group) {
+                for data_channel in data_channels {
+                    if let Ok(_) = data_channel.send(&bytes).await {
+                        log::log_message("Audio data sent successfully");
+                    } else {
+                        log::log_message("Failed to send audio data");
+                    }
                 }
             }
         } else {
@@ -162,30 +175,32 @@ impl WebRTCModule {
         }
         Ok(())
     }
-    pub async fn receive_audio(&self) -> mpsc::Receiver<Vec<u8>> {
+    pub async fn receive_audio(&self, group: &str) -> mpsc::Receiver<Vec<u8>> {
         let (sender, receiver) = mpsc::channel(100); // Channel to send audio data
 
-        for data_channel in &self.audio_data_channels {
-            let sender_clone = sender.clone();
-            let data_channel_clone = Arc::clone(data_channel);
-            let active = self.audio_receiving_active.clone();
+        if let Some(data_channels) = self.audio_data_channels.get(group) {
+            for data_channel in data_channels {
+                let sender_clone = sender.clone();
+                let data_channel_clone = Arc::clone(data_channel);
+                let active = self.audio_receiving_active.clone();
 
-            data_channel_clone.on_message(Box::new(move |msg: DataChannelMessage| {
-                let mut sender_clone = sender_clone.clone();
-                let active = active.clone();
-                tokio::spawn(async move {
-                    let active = *active.lock().await;
-                    if !active {
-                        return;
-                    }
-                    let data = msg.data.to_vec();
-                    // Send the data through the channel
-                    if let Err(_) = sender_clone.try_send(data) {
-                        log::log_message("Failed to send received audio data");
-                    }
-                });
-                Box::pin(async {})
-            }));
+                data_channel_clone.on_message(Box::new(move |msg: DataChannelMessage| {
+                    let mut sender_clone = sender_clone.clone();
+                    let active = active.clone();
+                    tokio::spawn(async move {
+                        let active = *active.lock().await;
+                        if !active {
+                            return;
+                        }
+                        let data = msg.data.to_vec();
+                        // Send the data through the channel
+                        if let Err(_) = sender_clone.try_send(data) {
+                            log::log_message("Failed to send received audio data");
+                        }
+                    });
+                    Box::pin(async {})
+                }));
+            }
         }
         receiver
     }
@@ -207,7 +222,14 @@ impl WebRTCModule {
     }
 }
 
-async fn create_peer_connection(api: &webrtc::api::API, audio_data_channels: &mut Vec<Arc<RTCDataChannel>>, signaling_sender: mpsc::Sender<Message>, peer_id: String, remote_peer_id: String) -> Result<RTCPeerConnection, Error> {
+async fn create_peer_connection(
+    api: &webrtc::api::API,
+    audio_data_channels: &mut HashMap<String, Vec<Arc<RTCDataChannel>>>,
+    signaling_sender: mpsc::Sender<Message>,
+    peer_id: String,
+    remote_peer_id: String,
+    group: &str
+) -> Result<RTCPeerConnection, Error> {
     let config = create_rtc_configuration();
     let peer_connection = api.new_peer_connection(config).await?;
 
@@ -230,7 +252,10 @@ async fn create_peer_connection(api: &webrtc::api::API, audio_data_channels: &mu
         ..Default::default()
     };
     let audio_data_channel = peer_connection.create_data_channel("audio", Some(data_channel_init)).await?;
-    audio_data_channels.push(audio_data_channel);
+    audio_data_channels.entry(group.to_string())
+        .or_insert(Vec::new())
+        .push(Arc::new(audio_data_channel));
+
     Ok(peer_connection)
 }
 async fn create_media_engine() -> Result<MediaEngine, webrtc::Error>  {

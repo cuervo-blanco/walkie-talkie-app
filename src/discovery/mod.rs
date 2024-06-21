@@ -1,31 +1,92 @@
 // mDNS or custom discovery
-use mdns_sd::ServiceDaemon;
-use std::sync::mpsc::Receiver;
+use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent, ServiceDaemonError, TxtProperties, TxtProperty};
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr};
 
-pub struct Channel;
+pub struct Room {
+    pub name: String,
+    pub address: IpAddr,
+    pub port: u16,
+    pub creator_device_id: String,
+    pub properties: HashMap<String, String> // This can store user permissions, group memeberships, etc.
+}
 
-pub fn start_mdns_responder() -> ServiceDaemon {
+
+pub fn start_mdns_responder() -> Result<ServiceDaemon, ServiceDaemonError> {
     // Initialize and return an mDNS ServiceDaemon
-    todo!()
+    ServiceDaemon::new()
 }
 
-#[allow(unused_variables)]
-pub fn broadcast_service(room_name: &str, creator_device_id: &str) {
+pub fn broadcast_service(room_name: &str, creator_device_id: &str, port: u16) -> Result<ServiceInfo, Box<dyn std::error::Error>> {
     // Logic to broadcast mDNS service
+    let service_name = format!("{}_{}", room_name, creator_device_id);
+    let service_type = "_http._tcp.local"; // Service type for mDNS
+    let hostname = format!("{}.local.", creator_device_id);
+    let instance_name = room_name.to_string();
+    let properties = HashMap::new();
+
+    let service_info = ServiceInfo::new(
+        &service_type,
+        &service_name,
+        &hostname,
+        &instance_name,
+        port,
+        properties,
+    )?;
+
+    let responder = start_mdns_responder()?;
+    responder.register(service_info.clone())?;
+
+    Ok(service_info)
 }
 
-#[allow(unused_variables)]
-pub fn discover_networks(service_type: &str) -> Receiver<mdns_sd::ServiceEvent> {
-    // Return receiver for discovered services
-    todo!()
+pub fn discover_networks(service_type: &str) -> Result<Receiver<mdns_sd::ServiceEvent>, Box<dyn std::error::Error>> {
+    let responder = start_mdns_responder()?;
+    let (sender, receiver) = mpsc::channel();
+
+    let _service_discovery = responder.browse(service_type, move |result| {
+            match result {
+                Ok(event) => {
+                    sender.send(event).unwrap();
+                },
+                Err(e) => {
+                    eprintln!("Failed to discover service: {}", e);
+                }
+            }
+    })?;
+
+    Ok(receiver)
 }
 
-pub fn get_available_channels() -> Vec<Channel> {
-    // Return a list of available channels
-    // Maybe consider returning Vec<Strig> instead of Channel...
-    // since channels are created in the communication module
-    todo!()
+pub fn get_available_rooms(receiver: Receiver<ServiceEvent>) -> Vec<Room> {
+    let mut rooms = Vec::new();
+    while let Ok(event) = receiver.recv_timeout(Duration::from_secs(2)) {
+        if let ServiceEvent::ServiceResolved(info) = event {
+            if let Some(address) = info.get_addresses().iter().next() {
+                rooms.push(Room {
+                    name: info.get_fullname().to_string(),
+                    address: *address,
+                    port: info.get_port(),
+                    creator_device_id: info.get_property("creator_device_id").unwrap().to_string(),
+                    properties: txt_properties_to_hash_map(info.get_properties()),
+                });
+            }
+        }
+    }
+    rooms
 }
-pub fn select_network() {
-    todo!()
+
+fn txt_properties_to_hash_map(txt_properties: &TxtProperties) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for txt_property in txt_properties.iter() {
+        let key = txt_property.key().to_string();
+        let value = txt_property.val_str();
+        map.insert(key, value.to_string());
+    }
+    map
+}
+pub fn select_network(channels: Vec<Room>) -> Option<Room>{
+    channels.into_iter().next()
 }
