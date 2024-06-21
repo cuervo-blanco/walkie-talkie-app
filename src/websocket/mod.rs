@@ -70,19 +70,26 @@ async fn handle_connection(peer_map: PeerMap, raw_stream: tokio::net::TcpStream)
                     Message::Text(text) => {
                         // Register a peer
                         if text.starts_with("register:") {
-                            let peer_id = text[9..].to_string();
+                            let parts: Vec<&str> = text.splitn(3, ':').collect();
+                            let peer_id = parts[1].to_string();
+                            let _groups: Vec<String> = parts[2].split(',').
+                                map(|s| s.to_string()).collect();
+
                             let mut peers = peer_map.lock().await;
                             peers.insert(peer_id.clone(), write.clone());
+
                             // Send the list of peers to the newly connected peer
                             let peer_list = peers.keys().cloned().collect::<Vec<String>>().join(",");
                             let new_peer = peers.get(&peer_id).unwrap();
                             let mut new_peer = new_peer.lock().await;
                             new_peer.send(Message::Text(peer_list)).await.expect("Failed to send peer list");
+
                             // Notify existing peers about the new peer
                             for(id, peer) in peers.iter() {
                                 if id != &peer_id {
                                     let mut peer = peer.lock().await;
-                                    peer.send(Message::Text(format!("new_peer:{}", peer_id))).await.expect("Failed to notify peers about new peer");
+                                    peer.send(Message::Text(
+                                        format!("new_peer:{}:{}", peer_id, parts[2]))).await.expect("Failed to notify peers about new peer");
                                 }
                             }
 
