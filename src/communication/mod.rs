@@ -1,11 +1,14 @@
 // WebRTC logic, data channels
 use bytes::Bytes;
+use tokio_tungstenite::MaybeTlsStream;
+use tokio::net::TcpStream;
+use tokio_tungstenite::WebSocketStream;
 use crate::audio::FormattedAudio;
 use crate::log;
 use futures::{SinkExt, StreamExt};
+use futures::stream::SplitSink;
 use futures::channel::mpsc;
 use std::collections::HashMap;
-#[allow(unused_imports)]
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
@@ -15,7 +18,6 @@ use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::Error;
-#[allow(unused_imports)]
 use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
@@ -34,6 +36,7 @@ pub struct WebRTCModule {
     audio_sending_active: Arc<Mutex<bool>>,
     audio_receiving_active: Arc<Mutex<bool>>,
     peer_groups: HashMap<String, Vec<String>>,
+    ws_sink: Option<Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::Message>>>>
 }
 
 impl WebRTCModule {
@@ -48,6 +51,7 @@ impl WebRTCModule {
             audio_sending_active: Arc::new(Mutex::new(true)),
             audio_receiving_active: Arc::new(Mutex::new(true)),
             peer_groups: HashMap::new(),
+            ws_sink: None
         })
     }
     pub async fn join_group(&mut self, group: &str, data_channel: Arc<RTCDataChannel>) {
@@ -59,6 +63,24 @@ impl WebRTCModule {
         if let Some(data_channels) = self.audio_data_channels.get_mut(group) {
             data_channels.retain(|dc| !Arc::ptr_eq(dc, &data_channel));
         }
+    }
+    pub async fn update_user_groups(&mut self, peer_id: &str, new_groups: Vec<String>
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.peer_groups.insert(peer_id.to_string(), new_groups.clone());
+
+        let group_update_message = format!("group_update:{}:{}",
+            peer_id, new_groups.join(",")
+        );
+        self.broadcast_message(&group_update_message).await?;
+        Ok(())
+    }
+
+    async fn broadcast_message(&self, message: &str)
+    -> Result<(), Box<dyn std::error::Error>> {
+        let ws_sink_clone = self.ws_sink.clone().expect("Unable to clone WebRTC Stream");
+        let mut ws_sink = ws_sink_clone.lock().await;
+        ws_sink.send(Message::Text(message.to_string())).await?;
+        Ok(())
     }
 
     pub async fn signaling_loop(
@@ -72,6 +94,7 @@ impl WebRTCModule {
         let (ws_sink, mut ws_stream) = ws_stream.split();
 
         let ws_sink = Arc::new(Mutex::new(ws_sink));
+        self.ws_sink = Some(ws_sink.clone());
 
         {
             let mut sink = ws_sink.lock().await;
@@ -225,20 +248,6 @@ impl WebRTCModule {
                                         ice_candidate
                                     ).await?;
                                 }
-                            }
-                            "update_groups" => {
-                                let new_groups: Vec<String> = parts[2].split(',')
-                                    .map(|s| s.to_string()).collect();
-                                self.peer_groups.insert(
-                                    remote_peer_id.clone().to_string(), new_groups.clone()
-                                );
-                                let mut sink = ws_sink.lock().await;
-                                sink.send(Message::Text(
-                                    format!("group_update:{}:{}",
-                                        remote_peer_id,
-                                        new_groups.join(",")
-                                    )
-                                )).await?;
                             }
                             "group_update:" => {
                                 let new_groups: Vec<String> = parts[2].split(',')
