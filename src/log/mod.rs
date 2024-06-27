@@ -1,16 +1,27 @@
+// ============================================
+//                  Imports
+// ============================================
 use chrono::Local;
 use lazy_static::lazy_static;
 use std::fs::{OpenOptions, File};
 use std::sync::Mutex;
 use std::io::Write;
-
+// ============================================
+//            Global Logger Instance
+// ============================================
 lazy_static! {
     static ref LOGGER: Mutex<Logger> = Mutex::new(Logger::new("log.txt").unwrap());
 }
+// ============================================
+//                 Logger Struct
+// ============================================
 
 pub struct Logger {
     file: File,
 }
+// ============================================
+//           Logger Implementation
+// ============================================
 
 impl Logger {
     pub fn new(file_path: &str) -> std::io::Result<Logger> {
@@ -35,7 +46,9 @@ impl Logger {
         Ok(())
     }
 }
-
+// ============================================
+//                Log Message
+// ============================================
 pub fn log_message(message: &str) {
     if let Ok(mut logger) = LOGGER.lock() {
         logger.log_message(message).expect("Failed to log message");
