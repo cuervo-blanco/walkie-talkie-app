@@ -1,4 +1,6 @@
-// WebRTC logic, data channels
+// ============================================
+//                  Imports
+// ============================================
 use bytes::Bytes;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio::net::TcpStream;
@@ -27,6 +29,10 @@ use webrtc::peer_connection::policy::rtcp_mux_policy::RTCRtcpMuxPolicy;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 
+// ============================================
+//                 Structures
+// ============================================
+
 pub struct Destination;
 
 pub struct WebRTCModule {
@@ -38,6 +44,10 @@ pub struct WebRTCModule {
     peer_groups: HashMap<String, Vec<String>>,
     ws_sink: Option<Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::Message>>>>
 }
+
+// ============================================
+//              Implementation
+// ============================================
 
 impl WebRTCModule {
     pub async fn new() -> Result<Self, webrtc::Error> {
@@ -54,6 +64,7 @@ impl WebRTCModule {
             ws_sink: None
         })
     }
+    // Group management
     pub async fn join_group(&mut self, group: &str, data_channel: Arc<RTCDataChannel>) {
         self.audio_data_channels.entry(group.to_string())
             .or_insert_with(Vec::new)
@@ -74,7 +85,7 @@ impl WebRTCModule {
         self.broadcast_message(&group_update_message).await?;
         Ok(())
     }
-
+    // Broadcasting
     async fn broadcast_message(&self, message: &str)
     -> Result<(), Box<dyn std::error::Error>> {
         let ws_sink_clone = self.ws_sink.clone().expect("Unable to clone WebRTC Stream");
@@ -82,6 +93,10 @@ impl WebRTCModule {
         ws_sink.send(Message::Text(message.to_string())).await?;
         Ok(())
     }
+
+    // ============================================
+    //            Signaling Loop
+    // ============================================
 
     pub async fn signaling_loop(
         &mut self, signaling_url: &str,
@@ -265,7 +280,16 @@ impl WebRTCModule {
         }
         Ok(())
     }
-    pub async fn send_audio(&self, audio_data: FormattedAudio, group: &str) -> Result<(), Box<dyn std::error::Error>>{
+
+    // ============================================
+    //            Audio Handling
+    // ============================================
+
+    pub async fn send_audio(
+        &self,
+        audio_data: FormattedAudio,
+        group: &str)
+    -> Result<(), Box<dyn std::error::Error>>{
         let active = *self.audio_sending_active.lock().await;
         if !active {
             return Ok(());
@@ -317,6 +341,9 @@ impl WebRTCModule {
         }
         receiver
     }
+    // ============================================
+    //            Control Audio Sending/Receiving
+    // ============================================
     pub async fn stop_sending_audio(&self) {
         let mut active = self.audio_sending_active.lock().await;
         *active = false;
@@ -334,7 +361,9 @@ impl WebRTCModule {
         *active = true;
     }
 }
-
+// ============================================
+//            Helper Functions
+// ============================================
 async fn create_peer_connection(
     api: &webrtc::api::API,
     audio_data_channels: &mut HashMap<String, Vec<Arc<RTCDataChannel>>>,
@@ -379,6 +408,7 @@ async fn create_peer_connection(
 
     Ok(peer_connection)
 }
+// Media Engine
 async fn create_media_engine() -> Result<MediaEngine, webrtc::Error>  {
     let mut media_engine = MediaEngine::default();
     // Register default codecs including Opus
@@ -393,6 +423,7 @@ async fn create_media_engine() -> Result<MediaEngine, webrtc::Error>  {
         }
     }
 }
+// API Creation
 async fn create_api() -> Result<webrtc::api::API, Error> {
     let media_engine = match create_media_engine().await {
         Ok(engine) => {
@@ -408,6 +439,7 @@ async fn create_api() -> Result<webrtc::api::API, Error> {
     let api = APIBuilder::new().with_media_engine(media_engine).build();
     Ok(api)
 }
+// RTC Configuration
 fn create_rtc_configuration() -> RTCConfiguration {
     RTCConfiguration {
         // Maybe add STUN server in future
@@ -420,6 +452,7 @@ fn create_rtc_configuration() -> RTCConfiguration {
         ..Default::default()
     }
 }
+// Create Offer
 async fn create_offer(peer_connection: &RTCPeerConnection) -> Result<String, Error> {
     // First step when communicating with peer
     let offer = peer_connection.create_offer(None).await?;
@@ -428,6 +461,7 @@ async fn create_offer(peer_connection: &RTCPeerConnection) -> Result<String, Err
 
     Ok(offer.sdp)
 }
+// Create Answer
 async fn create_answer(peer_connection: &RTCPeerConnection) -> Result<String, Error> {
     // Response to peer upon receiving offer (sends answer)
     let answer = peer_connection.create_answer(None).await?;
@@ -436,16 +470,19 @@ async fn create_answer(peer_connection: &RTCPeerConnection) -> Result<String, Er
 
     Ok(answer.sdp)
 }
+// Set Remote Description
 async fn set_remote_description(peer_connection: &RTCPeerConnection, received_offer: RTCSessionDescription) -> Result<(), Error> {
     // Receives offer and sets it as the remote description
     peer_connection.set_remote_description(received_offer).await?;
     Ok(())
 }
+// Add ICE Candidate
 async fn add_ice_candidate(peer_connection: &RTCPeerConnection, candidate: RTCIceCandidateInit) -> Result<(), Error> {
     // Adds Received ICE candidate
     peer_connection.add_ice_candidate(candidate).await?;
     Ok(())
 }
+// Handle Peer Connection Events
 #[allow(dead_code)]
 async fn handle_peer_connection_events(peer_connection: &RTCPeerConnection) {
     #[allow(unused_variables)]

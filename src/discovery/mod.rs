@@ -1,9 +1,16 @@
+// ============================================
+//                  Imports
+// ============================================
 // mDNS or custom discovery
 use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent, ServiceDaemonError, TxtProperties, TxtProperty};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
+
+// ============================================
+//                 Structures
+// ============================================
 
 pub struct Room {
     pub name: String,
@@ -12,13 +19,16 @@ pub struct Room {
     pub creator_device_id: String,
     pub properties: HashMap<String, String> // This can store user permissions, group memeberships, etc.
 }
-
-
+// ============================================
+//              mDNS Responder
+// ============================================
 pub fn start_mdns_responder() -> Result<ServiceDaemon, ServiceDaemonError> {
     // Initialize and return an mDNS ServiceDaemon
     ServiceDaemon::new()
 }
-
+// ============================================
+//            Broadcast Service
+// ============================================
 pub fn broadcast_service(room_name: &str, creator_device_id: &str, port: u16) -> Result<ServiceInfo, Box<dyn std::error::Error>> {
     // Logic to broadcast mDNS service
     let service_name = format!("{}_{}", room_name, creator_device_id);
@@ -41,7 +51,9 @@ pub fn broadcast_service(room_name: &str, creator_device_id: &str, port: u16) ->
 
     Ok(service_info)
 }
-
+// ============================================
+//            Discover Networks
+// ============================================
 pub fn discover_networks(service_type: &str) -> Result<Receiver<mdns_sd::ServiceEvent>, Box<dyn std::error::Error>> {
     let responder = start_mdns_responder()?;
     let (sender, receiver) = mpsc::channel();
@@ -59,7 +71,9 @@ pub fn discover_networks(service_type: &str) -> Result<Receiver<mdns_sd::Service
 
     Ok(receiver)
 }
-
+// ============================================
+//            Get Available Rooms
+// ============================================
 pub fn get_available_rooms(receiver: Receiver<ServiceEvent>) -> Vec<Room> {
     let mut rooms = Vec::new();
     while let Ok(event) = receiver.recv_timeout(Duration::from_secs(2)) {
@@ -77,7 +91,9 @@ pub fn get_available_rooms(receiver: Receiver<ServiceEvent>) -> Vec<Room> {
     }
     rooms
 }
-
+// ============================================
+//       Convert TxtProperties to HashMap
+// ============================================
 fn txt_properties_to_hash_map(txt_properties: &TxtProperties) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for txt_property in txt_properties.iter() {
@@ -87,6 +103,9 @@ fn txt_properties_to_hash_map(txt_properties: &TxtProperties) -> HashMap<String,
     }
     map
 }
+// ============================================
+//           Select Network Room
+// ============================================
 pub fn select_network(channels: Vec<Room>) -> Option<Room>{
     channels.into_iter().next()
 }

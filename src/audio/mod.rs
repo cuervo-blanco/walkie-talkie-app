@@ -1,3 +1,6 @@
+// ============================================
+//                  Imports
+// ============================================
 use cpal::platform::Host;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
@@ -11,7 +14,12 @@ const CHANNELS: Channels = Channels::Mono;
 
 pub type FormattedAudio = Result<Vec<u8>, opus::Error>;
 
-// Open communication with the default audio interface
+// ============================================
+//       Initialize Audio Interface
+// Open communication with the default audio
+// interface.
+// ============================================
+
 pub fn initialize_audio_interface() -> (Option<cpal::Device>, Option<cpal::Device>) {
 
     // Get the default host
@@ -43,7 +51,9 @@ pub fn initialize_audio_interface() -> (Option<cpal::Device>, Option<cpal::Devic
 
     (input_device, output_device)
 }
-
+// ============================================
+//            Get Audio Config
+// ============================================
 pub fn get_audio_config(device: &cpal::Device) -> Result<cpal::StreamConfig, cpal::DefaultStreamConfigError> {
     let config = match device.default_output_config() {
         Ok(cnfg) => cnfg,
@@ -61,7 +71,9 @@ pub fn get_audio_config(device: &cpal::Device) -> Result<cpal::StreamConfig, cpa
 
     Ok(config)
 }
-
+// ============================================
+//        Start Input Stream
+// ============================================
 pub fn start_input_stream(input_device: &cpal::Device, config: &cpal::StreamConfig) -> Result<cpal::Stream, cpal::BuildStreamError> {
     // Start the audio input/output stream
 
@@ -100,7 +112,9 @@ pub fn start_input_stream(input_device: &cpal::Device, config: &cpal::StreamConf
     }
 
 }
-
+// ============================================
+//        Start Output Stream
+// ============================================
 pub fn start_output_stream(output_device: &cpal::Device, config: &cpal::StreamConfig,
     received_data: Arc<Mutex<Vec<u8>>>) -> Result<cpal::Stream, cpal::BuildStreamError> {
     // Start the audio input/output stream
@@ -142,8 +156,10 @@ pub fn start_output_stream(output_device: &cpal::Device, config: &cpal::StreamCo
         }
     }
 }
-
-// Stop the audio stream
+// ============================================
+//        Stop Audio Stream
+// Stop the audio stream.
+// ============================================
 pub fn stop_audio_stream(stream: cpal::Stream) {
     match stream.pause() {
         Ok(_) => {
@@ -157,7 +173,9 @@ pub fn stop_audio_stream(stream: cpal::Stream) {
     // Explicitly dropping the stream after attempting to pause it
     drop(stream);
 }
-
+// ============================================
+//    Convert PCM to Opus Format
+// ============================================
 // Convert audio stream from PCM format to Opus format
 pub fn convert_audio_stream_to_opus(input_stream: &[f32]) -> Result<Vec<u8>, opus::Error> {
     let mut opus_encoder = Encoder::new(SAMPLE_RATE, CHANNELS, Application::Audio)?;
@@ -165,7 +183,9 @@ pub fn convert_audio_stream_to_opus(input_stream: &[f32]) -> Result<Vec<u8>, opu
     let len = opus_encoder.encode_float(input_stream, &mut encoded_data)?;
     Ok(encoded_data[..len].to_vec())
 }
-
+// ============================================
+//    Decode Opus to PCM Format
+// ============================================
 // Decode an audio stream  from Oputs format to PCM format
 pub fn decode_opus_to_pcm(opus_data: &[u8]) -> Result<Vec<f32>, opus::Error> {
     let mut decoder = Decoder::new(SAMPLE_RATE, Channels::Stereo)?;

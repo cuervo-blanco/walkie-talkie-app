@@ -1,3 +1,6 @@
+// ============================================
+//                  Imports
+// ============================================
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::accept_async;
@@ -10,11 +13,15 @@ use crate::log;
 use futures::stream::SplitSink;
 
 type PeerMap = Arc<Mutex<HashMap<String, Arc<Mutex<SplitSink<tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>, Message>>>>>>;
-
+// ============================================
+//                 Structures
+// ============================================
 pub struct WebSocketStream {
     peer_map: PeerMap,
 }
-
+// ============================================
+//              Implementation
+// ============================================
 impl WebSocketStream {
     // Creates a new WebSocketStream instance with an empty peer map
     pub fn new() -> Self {
@@ -22,6 +29,10 @@ impl WebSocketStream {
             peer_map: PeerMap::default(),
         }
     }
+
+    // ============================================
+    //            Start WebSocket Server
+    // ============================================
 
     // Starts the WebSocket server and listens for incoming connections on the specified address
     pub async fn start(&self, addr: &str) {
@@ -34,8 +45,12 @@ impl WebSocketStream {
             tokio::spawn(handle_connection(peer_map, stream));
         }
     }
+    // ============================================
+    //              Relay Message
+    // Relay a message to a specific peer
+    // identified by the target peer ID.
+    // ============================================
 
-    // Relay a message to a specific peer identified by the target peer ID
     pub async fn relay_message(&self, target_peer_id: &str,
         message_content: &str) -> Result<(), Box<dyn std::error::Error>> {
 
@@ -47,12 +62,17 @@ impl WebSocketStream {
         }
         Ok(())
     }
+    // ============================================
+    //            Get Peer List
+    // ============================================
      pub async fn get_peer_list(&self) -> Vec<String> {
         let peers = self.peer_map.lock().await;
         peers.keys().cloned().collect::<Vec<String>>()
     }
 }
-
+// ============================================
+//            Handle Connection
+// ============================================
 async fn handle_connection(peer_map: PeerMap, raw_stream: tokio::net::TcpStream) {
     // Accept the WebSocket Connection
     let ws_stream = accept_async(raw_stream).await.expect("Failed to accept");
@@ -79,10 +99,12 @@ async fn handle_connection(peer_map: PeerMap, raw_stream: tokio::net::TcpStream)
                             peers.insert(peer_id.clone(), write.clone());
 
                             // Send the list of peers to the newly connected peer
-                            let peer_list = peers.keys().cloned().collect::<Vec<String>>().join(",");
+                            let peer_list = peers.keys().cloned()
+                                .collect::<Vec<String>>().join(",");
                             let new_peer = peers.get(&peer_id).unwrap();
                             let mut new_peer = new_peer.lock().await;
-                            new_peer.send(Message::Text(peer_list)).await.expect("Failed to send peer list");
+                            new_peer.send(Message::Text(peer_list)).await
+                                .expect("Failed to send peer list");
 
                             // Notify existing peers about the new peer
                             for(id, peer) in peers.iter() {
