@@ -1,5 +1,5 @@
 // ============================================
-//                  Imports
+//                  Scope/Imports
 // ============================================
 use cpal::platform::Host;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -195,3 +195,4 @@ pub fn decode_opus_to_pcm(opus_data: &[u8]) -> Result<Vec<f32>, opus::Error> {
     pcm_data.truncate(decoded_samples * 1);
     Ok(pcm_data)
 }
+

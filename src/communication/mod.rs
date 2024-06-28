@@ -37,10 +37,13 @@ pub struct Destination;
 
 pub struct WebRTCModule {
     api: webrtc::api::API,
+    // Peer Connections: <Name, PeerConnection>
     peer_connections: HashMap<String, RTCPeerConnection>,
+    // Audio Data Channels: <Group, DataChannel>
     audio_data_channels: HashMap<String, Vec<Arc<RTCDataChannel>>>,
     audio_sending_active: Arc<Mutex<bool>>,
     audio_receiving_active: Arc<Mutex<bool>>,
+    // Peer Groups: <PeerId, Group Membership>
     peer_groups: HashMap<String, Vec<String>>,
     ws_sink: Option<Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::Message>>>>
 }
@@ -154,6 +157,8 @@ impl WebRTCModule {
 
                 let mut sink = ws_sink.lock().await;
                 sink.send(Message::Text(
+                    // Message Format
+                    // {receiver}:{type}:{sender}:{message}
                     format!("{}:offer:{}:{}", peer, peer_id, offer_sdp)
                 )).await?;
             }
