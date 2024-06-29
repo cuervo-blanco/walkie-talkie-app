@@ -2,11 +2,13 @@
 //                  Imports
 // ============================================
 // mDNS or custom discovery
+#[allow(unused_imports)]
 use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent, ServiceDaemonError, TxtProperties, TxtProperty};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
+use crate::db;
 
 // ============================================
 //                 Structures
@@ -17,7 +19,7 @@ pub struct Room {
     pub address: IpAddr,
     pub port: u16,
     pub creator_device_id: String,
-    pub properties: HashMap<String, String> // This can store user permissions, group memeberships, etc.
+    pub properties: HashMap<String, String> // This can store user permissions, group memberships, etc.
 }
 // ============================================
 //              mDNS Responder
@@ -27,9 +29,40 @@ pub fn start_mdns_responder() -> Result<ServiceDaemon, ServiceDaemonError> {
     ServiceDaemon::new()
 }
 // ============================================
+//            Database Loading
+// ============================================
+pub fn load_rooms(pool: &db::SqlitePool) -> Vec<Room> {
+    let conn = pool.get().expect("Failed to get connection from pool");
+    let mut stmt = conn.prepare(
+        "SELECT name, address, port, creator_device_id, properties FROM rooms"
+    ).expect("Failed to prepare statement");
+
+    let room_iter = stmt.query_map([], |row| {
+        let properties: String = row.get(4)?;
+        let properties: HashMap<String, String> = serde_json::from_str(&properties)
+            .expect("Failed to deserialize properties");
+        Ok(Room {
+            name: row.get(0)?,
+            address: row.get(1)?.parse().expect("Failed to parse IP address"),
+            port: row.get(2)?,
+            creator_device_id: row.get(3)?,
+            properties
+        })
+    }).expect("Failed to map query");
+
+    let mut rooms = Vec::new();
+    for room in room_iter {
+        rooms.push(room.expect("Failed to get room info."));
+    }
+    rooms
+}
+
+// ============================================
 //            Broadcast Service
 // ============================================
-pub fn broadcast_service(room_name: &str, creator_device_id: &str, port: u16) -> Result<ServiceInfo, Box<dyn std::error::Error>> {
+pub fn broadcast_service(
+    pool: &db::SqlitePool, room_name: &str, creator_device_id: &str, port: u16
+) -> Result<ServiceInfo, Box<dyn std::error::Error>> {
     // Logic to broadcast mDNS service
     let service_name = format!("{}_{}", room_name, creator_device_id);
     let service_type = "_http._tcp.local"; // Service type for mDNS
@@ -49,7 +82,42 @@ pub fn broadcast_service(room_name: &str, creator_device_id: &str, port: u16) ->
     let responder = start_mdns_responder()?;
     responder.register(service_info.clone())?;
 
+    let room = Room {
+        name: room_name.to_string(),
+        address: IpAddr::V4(Ipv4Addr::LOCALHOST), //Replace with actual address
+        port,
+        creator_device_id: creator_device_id.to_string(),
+        properties: HashMap::new(), // Add actual properties
+    };
+    db::store_room_info(pool, &room);
+
     Ok(service_info)
+}
+
+pub fn load_and_broadcast_services(pool: &db::SqlitePool)
+-> Result<(), Box<dyn std::error::Error>> {
+    let rooms = load_rooms(pool);
+    let responder = start_mdns_responder()?;
+
+    for room in rooms {
+        let service_name = format!("{}_{}", room.name, room.creator_device_id);
+        let service_type = "_http._tcp.local"; // Service type for mDNS
+        let hostname = format!("{}.local.", room.creator_device_id);
+        let instance_name = room.name.clone();
+        let properties = HashMap::new(); // Add actual properties
+
+    let service_info = ServiceInfo::new(
+        &service_type,
+        &service_name,
+        &hostname,
+        &instance_name,
+        room.port,
+        properties,
+    )?;
+
+    responder.register(service_info.clone())?;
+    }
+    Ok(())
 }
 // ============================================
 //            Discover Networks

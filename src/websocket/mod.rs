@@ -10,23 +10,27 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::log;
+use crate::db;
 use futures::stream::SplitSink;
 
+pub type SqlitePool = Pool<SqliteConnectionManager>;
 type PeerMap = Arc<Mutex<HashMap<String, Arc<Mutex<SplitSink<tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>, Message>>>>>>;
 // ============================================
 //                 Structures
 // ============================================
 pub struct WebSocketStream {
     peer_map: PeerMap,
+    pool: SqlitePool
 }
 // ============================================
 //              Implementation
 // ============================================
 impl WebSocketStream {
     // Creates a new WebSocketStream instance with an empty peer map
-    pub fn new() -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self {
             peer_map: PeerMap::default(),
+            pool
         }
     }
 
@@ -69,6 +73,15 @@ impl WebSocketStream {
         let peers = self.peer_map.lock().await;
         peers.keys().cloned().collect::<Vec<String>>()
     }
+    // ============================================
+    //            Database Operations
+    // ============================================
+    async fn save_user_to_db(&self, peer_id: &str, group_info: &str) {
+        db::store_room_info(&self.pool, peer_id, group_info);
+        // Retrieve user permissions
+        let permissions = db::get_user_permissions(&self.pool, peer_id)
+            .expect("Failed to get user permissions");
+    }
 }
 // ============================================
 //            Handle Connection
@@ -90,13 +103,34 @@ async fn handle_connection(peer_map: PeerMap, raw_stream: tokio::net::TcpStream)
                     Message::Text(text) => {
                         // Register a peer
                         if text.starts_with("register:") {
+                            // register:{peer_id}:{groups}
                             let parts: Vec<&str> = text.splitn(3, ':').collect();
                             let peer_id = parts[1].to_string();
                             let _groups: Vec<String> = parts[2].split(',').
                                 map(|s| s.to_string()).collect();
 
+                            // Insert the Peer's Id and it's Write Sink into
+                            // the PeerMap HashMap<(String, Sink)>
                             let mut peers = peer_map.lock().await;
                             peers.insert(peer_id.clone(), write.clone());
+
+                                        //--------------TODO------------------
+                                        // - Write to the database information
+                                        // - Store User Permissions
+                                        //--------------TODO------------------
+                            let rooms = get_available_rooms_from_db(&pool);
+                            for room in rooms {
+                                // Send room info to the peer
+                            }
+
+                            let permissions = "some_permissions";
+                            store_user_permissions(
+                                &pool,
+                                &username,
+                                &permissions
+                            ).expect("Failed to store user permissions");
+
+
 
                             // Send the list of peers to the newly connected peer
                             let peer_list = peers.keys().cloned()
@@ -111,7 +145,13 @@ async fn handle_connection(peer_map: PeerMap, raw_stream: tokio::net::TcpStream)
                                 if id != &peer_id {
                                     let mut peer = peer.lock().await;
                                     peer.send(Message::Text(
-                                        format!("new_peer:{}:{}", peer_id, parts[2]))).await.expect("Failed to notify peers about new peer");
+                                        format!(
+                                            "new_peer:{}:{}",
+                                            peer_id,
+                                            parts[2]
+                                        )
+                                    )).await
+                                        .expect("Failed to notify peers about new peer");
                                 }
                             }
 

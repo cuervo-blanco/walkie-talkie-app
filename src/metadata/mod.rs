@@ -1,16 +1,13 @@
 use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
+use serde_json::json;
 // Metadata handling, serialization (JSON)
 
-#[derive(Serialize, Deserialize)]
-pub struct Data {
-    pub name: String,
-    pub value: String
-}
 
 #[allow(unused_variables)]
-pub fn serialize_data(data: &Data) -> String {
+pub fn serialize_hashmap(map: HashMap<String, String>) -> String {
     // Serialize data into JSON
-    todo!()
+    serde_json::to_string(&map).unwrap()
 }
 
 #[allow(unused_variables)]

@@ -28,6 +28,7 @@ use webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy
 use webrtc::peer_connection::policy::rtcp_mux_policy::RTCRtcpMuxPolicy;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use crate::db;
 
 // ============================================
 //                 Structures
@@ -45,7 +46,8 @@ pub struct WebRTCModule {
     audio_receiving_active: Arc<Mutex<bool>>,
     // Peer Groups: <PeerId, Group Membership>
     peer_groups: HashMap<String, Vec<String>>,
-    ws_sink: Option<Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::Message>>>>
+    ws_sink: Option<Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::Message>>>>,
+    pool: db::SqlitePool
 }
 
 // ============================================
@@ -53,10 +55,14 @@ pub struct WebRTCModule {
 // ============================================
 
 impl WebRTCModule {
-    pub async fn new() -> Result<Self, webrtc::Error> {
+    pub async fn new(pool: &db::SqlitePool) -> Result<Self, webrtc::Error> {
         // Initialize WebRTC communication
         let api = create_api().await?;
-        // Additional WebRTC logic here (e.g creating offers/answers, adding tracks, etc.)
+
+        // Load previously saved peer connections and audio channels
+        let peer_connections = db::load_peer_connections(&pool);
+        let audio_channels = db::load_audio_channels(&pool);
+
         Ok(Self{
             api,
             peer_connections: HashMap::new(),
@@ -64,7 +70,8 @@ impl WebRTCModule {
             audio_sending_active: Arc::new(Mutex::new(true)),
             audio_receiving_active: Arc::new(Mutex::new(true)),
             peer_groups: HashMap::new(),
-            ws_sink: None
+            ws_sink: None,
+            pool: pool.clone()
         })
     }
     // Group management
@@ -72,15 +79,26 @@ impl WebRTCModule {
         self.audio_data_channels.entry(group.to_string())
             .or_insert_with(Vec::new)
             .push(data_channel);
+
+        let data_channel_info = serde_json::to_string(&data_channel)
+            .expect("Failed to serialize data channel info");
+        db::store_audio_channel_info(&self.pool, group, &data_channel_info);
     }
     pub async fn leave_group(&mut self, group: &str, data_channel: Arc<RTCDataChannel>) {
         if let Some(data_channels) = self.audio_data_channels.get_mut(group) {
             data_channels.retain(|dc| !Arc::ptr_eq(dc, &data_channel));
+
+            let data_channel_info = serde_json::to_string(data_channels)
+                .expect("Failed to serialize data channel info");
+            db::store_audio_channel_info(&self.pool, group, &data_channel_info);
         }
     }
     pub async fn update_user_groups(&mut self, peer_id: &str, new_groups: Vec<String>
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.peer_groups.insert(peer_id.to_string(), new_groups.clone());
+
+        // Save peer connection info to database
+        db::store_peer_connection_info(&self.pool, peer_id, "connected", &new_groups);
 
         let group_update_message = format!("group_update:{}:{}",
             peer_id, new_groups.join(",")

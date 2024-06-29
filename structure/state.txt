@@ -1,0 +1,45 @@
+Current State
+
+1. Database Module (SQLite):
+- Manages the connection pool.
+- Provides functions to initialize the database, store room info, store user
+permissions, and retrieve data.
+
+2. WebSocket Module:
+- Manages WebSocket connections.
+- Uses a HashMap to store and manage peer connections.
+- Relays messages and manages the list of connected peers.
+
+3. Logging Module:
+- Provides a simple logging mechanism to log messages to a file.
+
+4. mDNS Module:
+- Provides service discovery and broadcasting functionality.
+- Uses mDNS to broadcast and discover services on the local network.
+
+5. Audio Module:
+- Manages audio input and output streams.
+- Encodes and decodes audio streams using Opus codec.
+
+6. Communication Module:
+- WebRTC signaling loop and data transmission.
+- Message Protocol
+
+
+//------------------------------Suggestions----------------------------------//
+
+Shared State:
+Use shared state (e.g., Arc<Mutex<...>>) to allow modules to share data
+efficiently.
+
+Example:
+Share the database pool across modules to avoid multiple initializations.
+
+Centralized Configuration:
+Use a centralized configuration to manage settings such as database paths,
+service names, etc.
+
+Event-Driven Architecture:
+Implement an event-driven architecture where modules can subscribe to events
+(e.g., new peer connected, new room created). This can be done using channels
+or an event bus.
