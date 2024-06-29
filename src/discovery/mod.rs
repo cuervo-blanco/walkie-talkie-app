@@ -3,7 +3,7 @@
 // ============================================
 // mDNS or custom discovery
 #[allow(unused_imports)]
-use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent, ServiceDaemonError, TxtProperties, TxtProperty};
+use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent, Error, TxtProperties, TxtProperty};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 use std::collections::HashMap;
@@ -24,79 +24,71 @@ pub struct Room {
 // ============================================
 //              mDNS Responder
 // ============================================
-pub fn start_mdns_responder() -> Result<ServiceDaemon, ServiceDaemonError> {
+pub fn start_mdns_responder() -> Result<ServiceDaemon, Error> {
     // Initialize and return an mDNS ServiceDaemon
     ServiceDaemon::new()
 }
 // ============================================
-//            Database Loading
-// ============================================
-pub fn load_rooms(pool: &db::SqlitePool) -> Vec<Room> {
-    let conn = pool.get().expect("Failed to get connection from pool");
-    let mut stmt = conn.prepare(
-        "SELECT name, address, port, creator_device_id, properties FROM rooms"
-    ).expect("Failed to prepare statement");
-
-    let room_iter = stmt.query_map([], |row| {
-        let properties: String = row.get(4)?;
-        let properties: HashMap<String, String> = serde_json::from_str(&properties)
-            .expect("Failed to deserialize properties");
-        Ok(Room {
-            name: row.get(0)?,
-            address: row.get(1)?.parse().expect("Failed to parse IP address"),
-            port: row.get(2)?,
-            creator_device_id: row.get(3)?,
-            properties
-        })
-    }).expect("Failed to map query");
-
-    let mut rooms = Vec::new();
-    for room in room_iter {
-        rooms.push(room.expect("Failed to get room info."));
-    }
-    rooms
-}
-
-// ============================================
 //            Broadcast Service
 // ============================================
 pub fn broadcast_service(
-    pool: &db::SqlitePool, room_name: &str, creator_device_id: &str, port: u16
+    pool: &db::SqlitePool,
+    room_name: &str,
+    creator_device_id: &str,
+    port: u16,
 ) -> Result<ServiceInfo, Box<dyn std::error::Error>> {
     // Logic to broadcast mDNS service
     let service_name = format!("{}_{}", room_name, creator_device_id);
     let service_type = "_http._tcp.local"; // Service type for mDNS
     let hostname = format!("{}.local.", creator_device_id);
     let instance_name = room_name.to_string();
-    let properties = HashMap::new();
+    let properties = HashMap::new(); // Permissions, etc.
 
+
+    // Create ServiceInfo Object
     let service_info = ServiceInfo::new(
         &service_type,
         &service_name,
         &hostname,
         &instance_name,
         port,
-        properties,
+        properties.clone(),
     )?;
 
+    // Register service with mDNS Responder
     let responder = start_mdns_responder()?;
     responder.register(service_info.clone())?;
 
+    // Create Room Object for database storage
     let room = Room {
         name: room_name.to_string(),
-        address: IpAddr::V4(Ipv4Addr::LOCALHOST), //Replace with actual address
+        address: get_local_ip_address().unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)), //Replace with actual address retrieval
         port,
         creator_device_id: creator_device_id.to_string(),
-        properties: HashMap::new(), // Add actual properties
+        properties, // Add actual properties
     };
     db::store_room_info(pool, &room);
 
     Ok(service_info)
 }
 
+fn get_local_ip_address() -> Option<IpAddr> {
+    let ifaces = get_if_addrs().unwrap();
+    for iface in ifaces {
+        if iface.is_loopback() {
+            continue;
+        }
+        return Some(iface.addr.ip());
+    }
+    None
+}
+
+// ============================================
+//            Load and Broadcast Services
+// ============================================
 pub fn load_and_broadcast_services(pool: &db::SqlitePool)
 -> Result<(), Box<dyn std::error::Error>> {
-    let rooms = load_rooms(pool);
+    let rooms = db::load_rooms(pool);
     let responder = start_mdns_responder()?;
 
     for room in rooms {
@@ -120,23 +112,26 @@ pub fn load_and_broadcast_services(pool: &db::SqlitePool)
     Ok(())
 }
 // ============================================
-//            Discover Networks
+//            Discover Services
 // ============================================
-pub fn discover_networks(service_type: &str) -> Result<Receiver<mdns_sd::ServiceEvent>, Box<dyn std::error::Error>> {
+pub fn discover_services() -> Result<Receiver<mdns_sd::ServiceEvent>, Box<dyn std::error::Error>> {
     let responder = start_mdns_responder()?;
     let (sender, receiver) = mpsc::channel();
 
-    let _service_discovery = responder.browse(service_type, move |result| {
-            match result {
-                Ok(event) => {
-                    sender.send(event).unwrap();
-                },
-                Err(e) => {
-                    eprintln!("Failed to discover service: {}", e);
-                }
-            }
-    })?;
+    let service_discovery = responder.browse("_http._tcp.local").unwrap();
 
+    std::thread::spawn(move || {
+        loop {
+            match service_discovery.recv() {
+                Ok(event) => {
+                    if sender.send(event).is_err() {
+                        break;
+                    }
+                },
+                Err(_) => break,
+            }
+        }
+    });
     Ok(receiver)
 }
 // ============================================
@@ -174,6 +169,6 @@ fn txt_properties_to_hash_map(txt_properties: &TxtProperties) -> HashMap<String,
 // ============================================
 //           Select Network Room
 // ============================================
-pub fn select_network(channels: Vec<Room>) -> Option<Room>{
-    channels.into_iter().next()
+pub fn select_service(_channels: Vec<Room>) -> Option<Room>{
+    todo!()
 }

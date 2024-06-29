@@ -43,3 +43,7 @@ Event-Driven Architecture:
 Implement an event-driven architecture where modules can subscribe to events
 (e.g., new peer connected, new room created). This can be done using channels
 or an event bus.
+
+//------------------------------Properties----------------------------------//
+
+- User Permissions

@@ -4,6 +4,7 @@
 use rusqlite::{params, Connection, Result};
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
+use std::collections::HashMap;
 use crate::discovery;
 
 // ============================================
@@ -44,6 +45,9 @@ pub fn initialize_database(pool: &SqlitePool) {
         [],
     ).expect("Failed to create user_permissions table");
 }
+// ============================================
+//          Store Peer Connection
+// ============================================
 pub fn store_peer_connection_info(pool: &SqlitePool, peer_id: &str,
     connection_state: &str, group_memberships: &[String]) {
     let conn = pool.get().expect("Failed to get connection from pool");
@@ -85,6 +89,9 @@ pub fn get_room_info(pool: &SqlitePool, name: &str) -> Result<Option<(i32, Strin
     }
     Ok(None)
 }
+// ============================================
+//            Load Peer Connections
+// ============================================
 pub fn load_peer_connections(pool: &SqlitePool) -> Vec<(String, String, Vec<String>)>{
     let conn = pool.get().expect("Failed to get connection from pool");
     let mut stmt = conn.prepare(
@@ -94,15 +101,43 @@ pub fn load_peer_connections(pool: &SqlitePool) -> Vec<(String, String, Vec<Stri
     let peer_iter = stmt.query_map([], |row| {
         let group_memberships_str: String = row.get(2)?;
         let group_memberships: Vec<String> = serde_json::from_str(&group_memberships_str)
-            .expect("Faile to deserialize group memberships");
+            .expect("Failed to deserialize group memberships");
         Ok((row.get(0)?, row.get(1)?, group_memberships))
     }).expect("Failed to map query");
 
-    let mut peer = Vec::new();
+    let mut peers = Vec::new();
     for peer in peer_iter {
         peers.push(peer.expect("Failed to get peer info."));
     }
     peers
+}
+// ============================================
+//            Load Rooms
+// ============================================
+pub fn load_rooms(pool: &SqlitePool) -> Vec<discovery::Room> {
+    let conn = pool.get().expect("Failed to get connection from pool");
+    let mut stmt = conn.prepare(
+        "SELECT name, address, port, creator_device_id, properties FROM rooms"
+    ).expect("Failed to prepare statement");
+
+    let room_iter = stmt.query_map([], |row| {
+        let properties: String = row.get(4)?;
+        let properties: HashMap<String, String> = serde_json::from_str(&properties)
+            .expect("Failed to deserialize properties");
+        Ok(discovery::Room {
+            name: row.get(0)?,
+            address: row.get(1)?.parse().expect("Failed to parse IP address"),
+            port: row.get(2)?,
+            creator_device_id: row.get(3)?,
+            properties
+        })
+    }).expect("Failed to map query");
+
+    let mut rooms = Vec::new();
+    for room in room_iter {
+        rooms.push(room.expect("Failed to get room info."));
+    }
+    rooms
 }
 // ============================================
 //        Store User Permissions

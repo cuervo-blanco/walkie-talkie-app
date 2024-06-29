@@ -158,8 +158,8 @@ pub fn start_output_stream(output_device: &cpal::Device, config: &cpal::StreamCo
 }
 // ============================================
 //        Stop Audio Stream
-// Stop the audio stream.
 // ============================================
+// Stop the audio stream.
 pub fn stop_audio_stream(stream: cpal::Stream) {
     match stream.pause() {
         Ok(_) => {
