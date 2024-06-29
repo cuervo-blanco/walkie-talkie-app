@@ -14,12 +14,13 @@ use crate::db;
 //                 Structures
 // ============================================
 
+#[derive(Debug, Clone)]
 pub struct Room {
     pub name: String,
     pub address: IpAddr,
     pub port: u16,
     pub creator_device_id: String,
-    pub properties: HashMap<String, String> // This can store user permissions, group memberships, etc.
+    pub metadata: HashMap<String, serde_json::Value> // This can store user permissions, group memberships, etc.
 }
 // ============================================
 //              mDNS Responder
@@ -36,13 +37,20 @@ pub fn broadcast_service(
     room_name: &str,
     creator_device_id: &str,
     port: u16,
+    metadata: HashMap<String, serde_json::Value>,
 ) -> Result<ServiceInfo, Box<dyn std::error::Error>> {
-    // Logic to broadcast mDNS service
+    // Serialize metadata to JSON string
+    let metadata_str = serde_json::to_string(&metadata)?;
+
+    //Prepare mDNS properties
+    let mut txt_properties = HashMap::new();
+    txt_properties.insert("metadata".to_string(), metadata_str);
+
+    // Create ServiceInfo Object
     let service_name = format!("{}_{}", room_name, creator_device_id);
     let service_type = "_http._tcp.local"; // Service type for mDNS
     let hostname = format!("{}.local.", creator_device_id);
     let instance_name = room_name.to_string();
-    let properties = HashMap::new(); // Permissions, etc.
 
 
     // Create ServiceInfo Object
@@ -52,7 +60,7 @@ pub fn broadcast_service(
         &hostname,
         &instance_name,
         port,
-        properties.clone(),
+        txt_properties
     )?;
 
     // Register service with mDNS Responder
@@ -65,7 +73,7 @@ pub fn broadcast_service(
         address: get_local_ip_address().unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)), //Replace with actual address retrieval
         port,
         creator_device_id: creator_device_id.to_string(),
-        properties, // Add actual properties
+        metadata,
     };
     db::store_room_info(pool, &room);
 
@@ -73,7 +81,7 @@ pub fn broadcast_service(
 }
 
 fn get_local_ip_address() -> Option<IpAddr> {
-    let ifaces = get_if_addrs().unwrap();
+    let ifaces = if_addrs::get_if_addrs().unwrap();
     for iface in ifaces {
         if iface.is_loopback() {
             continue;
@@ -96,7 +104,7 @@ pub fn load_and_broadcast_services(pool: &db::SqlitePool)
         let service_type = "_http._tcp.local"; // Service type for mDNS
         let hostname = format!("{}.local.", room.creator_device_id);
         let instance_name = room.name.clone();
-        let properties = HashMap::new(); // Add actual properties
+        let metadata = HashMap::new(); // Add actual properties
 
     let service_info = ServiceInfo::new(
         &service_type,
@@ -104,7 +112,7 @@ pub fn load_and_broadcast_services(pool: &db::SqlitePool)
         &hostname,
         &instance_name,
         room.port,
-        properties,
+        metadata,
     )?;
 
     responder.register(service_info.clone())?;
@@ -147,7 +155,7 @@ pub fn get_available_rooms(receiver: Receiver<ServiceEvent>) -> Vec<Room> {
                     address: *address,
                     port: info.get_port(),
                     creator_device_id: info.get_property("creator_device_id").unwrap().to_string(),
-                    properties: txt_properties_to_hash_map(info.get_properties()),
+                    metadata: txt_metadata_to_hashmap(info.get_properties()),
                 });
             }
         }
@@ -166,9 +174,13 @@ fn txt_properties_to_hash_map(txt_properties: &TxtProperties) -> HashMap<String,
     }
     map
 }
-// ============================================
-//           Select Network Room
-// ============================================
-pub fn select_service(_channels: Vec<Room>) -> Option<Room>{
-    todo!()
+
+fn txt_metadata_to_hashmap(txt_properties: &TxtProperties) -> HashMap<String, serde_json::Value> {
+    let mut map = HashMap::new();
+    if let Some(metadata) = txt_properties.get("metadata") {
+        if let Ok(parsed_metadata) = serde_json::from_str::<HashMap<String, serde_json::Value>>(&metadata.to_string()) {
+            map = parsed_metadata;
+        }
+    }
+    map
 }

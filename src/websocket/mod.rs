@@ -11,23 +11,23 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::log;
 use crate::db;
+use crate::discovery;
 use futures::stream::SplitSink;
 
-pub type SqlitePool = Pool<SqliteConnectionManager>;
 type PeerMap = Arc<Mutex<HashMap<String, Arc<Mutex<SplitSink<tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>, Message>>>>>>;
 // ============================================
 //                 Structures
 // ============================================
 pub struct WebSocketStream {
     peer_map: PeerMap,
-    pool: SqlitePool
+    pool: db::SqlitePool
 }
 // ============================================
 //              Implementation
 // ============================================
 impl WebSocketStream {
     // Creates a new WebSocketStream instance with an empty peer map
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: db::SqlitePool) -> Self {
         Self {
             peer_map: PeerMap::default(),
             pool
@@ -76,11 +76,8 @@ impl WebSocketStream {
     // ============================================
     //            Database Operations
     // ============================================
-    async fn save_user_to_db(&self, peer_id: &str, group_info: &str) {
-        db::store_room_info(&self.pool, peer_id, group_info);
-        // Retrieve user permissions
-        let permissions = db::get_user_permissions(&self.pool, peer_id)
-            .expect("Failed to get user permissions");
+    async fn save_user_to_db(&self, room: discovery::Room) {
+        db::store_room_info(&self.pool, &room);
     }
 }
 // ============================================
@@ -118,19 +115,6 @@ async fn handle_connection(peer_map: PeerMap, raw_stream: tokio::net::TcpStream)
                                         // - Write to the database information
                                         // - Store User Permissions
                                         //--------------TODO------------------
-                            let rooms = get_available_rooms_from_db(&pool);
-                            for room in rooms {
-                                // Send room info to the peer
-                            }
-
-                            let permissions = "some_permissions";
-                            store_user_permissions(
-                                &pool,
-                                &username,
-                                &permissions
-                            ).expect("Failed to store user permissions");
-
-
 
                             // Send the list of peers to the newly connected peer
                             let peer_list = peers.keys().cloned()

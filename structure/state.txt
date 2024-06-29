@@ -46,4 +46,42 @@ or an event bus.
 
 //------------------------------Properties----------------------------------//
 
-- User Permissions
+Within the Room table, the properties could look like this:
+
+"Room_1": {
+    "groups": {
+        "group_1": {
+            "users": {
+                "user1": "admin",
+                "user2": "talk",
+                "user3": "talk",
+                "user4": "mute"
+            }
+        "group_2": {
+            "users": {
+                "user1": "admin",
+                "user2": "mute",
+                "user3": "admin",
+                "user4": "talk"
+            }
+        }
+    },
+"Room_2": {
+    "groups": {
+        "group_a": {
+            "users": {
+                "userA": "admin",
+                "userB": "talk",
+                "userC": "talk",
+                "userD": "mute"
+            }
+        "group_2": {
+            "users": {
+                "userA": "admin",
+                "userB": "mute",
+                "userC": "admin",
+                "userD": "talk"
+            }
+        }
+    },
+ }
