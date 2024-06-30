@@ -1,4 +1,8 @@
+// ============================================
+//          Dependencies and Imports
+// ============================================
 use std::io;
+use std::io::Write;
 use wt_tools::audio;
 use wt_tools::communication::WebRTCModule;
 use wt_tools::discovery;
@@ -9,15 +13,6 @@ use dialoguer::{theme::ColorfulTheme, Select};
 use tokio;
 use std::sync::{Arc, Mutex};
 
-fn title_card() {
-    println!("██╗    ██╗ █████╗ ██╗     ██╗  ██╗██╗███████╗    ████████╗ █████╗ ██╗     ██╗  ██╗██╗███████╗");
-    println!("██║    ██║██╔══██╗██║     ██║ ██╔╝██║██╔════╝    ╚══██╔══╝██╔══██╗██║     ██║ ██╔╝██║██╔════╝");
-    println!("██║ █╗ ██║███████║██║     █████╔╝ ██║█████╗         ██║   ███████║██║     █████╔╝ ██║█████╗");
-    println!("██║███╗██║██╔══██║██║     ██╔═██╗ ██║██╔══╝         ██║   ██╔══██║██║     ██╔═██╗ ██║██╔══╝");
-    println!("╚███╔███╔╝██║  ██║███████╗██║  ██╗██║███████╗       ██║   ██║  ██║███████╗██║  ██╗██║███████╗");
-    println!(" ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝       ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝");
-
-}
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     // Initialize the logger
@@ -38,16 +33,22 @@ async fn main() -> std::io::Result<()> {
         let selection = main_menu();
         match selection {
             0 => {
-                // Create Room
+                // ============================================
+                //          Create Room
+                // ============================================
                 let room_name = get_input("Enter room name: ");
-                let creator_device_id = get_input("Enter creator device ID: ");
+                let creator_device_id = get_input("Enter your ID: ");
                 let port: u16 = get_input("Enter port: ").parse().expect("Invalid port number");
 
                 let metadata = serde_json::json!({
                     "groups":{
                         "all": {
                             "members": {
-                                creator_device_id.to_string(): "admin",
+                                creator_device_id.to_string(): {
+                                    "admin": "true",
+                                    "online": "true",
+                                    "mute": "false"
+                                },
                             }
                         },
                     },
@@ -57,20 +58,28 @@ async fn main() -> std::io::Result<()> {
                 start_network_services(&websocket_stream, &webrtc_module, &creator_device_id, port).await;
             }
             1 => {
-                // Discover Rooms
+                // ============================================
+                //          Discover Rooms
+                // ============================================
                 let receiver = discovery::discover_services().unwrap();
                 let rooms = discovery::get_available_rooms(receiver);
                 display_rooms_to_user(&rooms);
             }
             2 => {
-                // Join Room
+                // ============================================
+                //          Join Room
+                // ============================================
                 let receiver = discovery::discover_services().unwrap();
                 let rooms = discovery::get_available_rooms(receiver);
+                let items: Vec<String> = Vec::new();
+                for room in rooms {
+                    items.push(room.name);
+                }
 
                 let selection = Select::with_theme(&ColorfulTheme::default())
-                    .with_prompt("Select and option")
+                    .with_prompt("Select a Room: ")
                     .default(0)
-                    .items(&rooms[..])
+                    .items(&items[..])
                     .interact()
                     .unwrap();
                 if selection > 0 && selection <= rooms.len() {
@@ -86,7 +95,9 @@ async fn main() -> std::io::Result<()> {
                 }
             }
             3 => {
-                // Exit
+                // ============================================
+                //          Exit Application
+                // ============================================
                 break;
             }
             _ => {
@@ -98,6 +109,21 @@ async fn main() -> std::io::Result<()> {
     Ok(())
 }
 
+// ============================================
+//          Title Card Function
+// ============================================
+fn title_card() {
+    println!("██╗    ██╗ █████╗ ██╗     ██╗  ██╗██╗███████╗    ████████╗ █████╗ ██╗     ██╗  ██╗██╗███████╗");
+    println!("██║    ██║██╔══██╗██║     ██║ ██╔╝██║██╔════╝    ╚══██╔══╝██╔══██╗██║     ██║ ██╔╝██║██╔════╝");
+    println!("██║ █╗ ██║███████║██║     █████╔╝ ██║█████╗         ██║   ███████║██║     █████╔╝ ██║█████╗");
+    println!("██║███╗██║██╔══██║██║     ██╔═██╗ ██║██╔══╝         ██║   ██╔══██║██║     ██╔═██╗ ██║██╔══╝");
+    println!("╚███╔███╔╝██║  ██║███████╗██║  ██╗██║███████╗       ██║   ██║  ██║███████╗██║  ██╗██║███████╗");
+    println!(" ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝       ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝");
+
+}
+// ============================================
+//          Main Menu Function
+// ============================================
 fn main_menu() -> usize {
     let selections = &[
         "Create Room",
@@ -107,7 +133,7 @@ fn main_menu() -> usize {
     ];
 
     let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Select and option")
+        .with_prompt("Select an option")
         .default(0)
         .items(&selections[..])
         .interact()
@@ -116,14 +142,19 @@ fn main_menu() -> usize {
     return selection
 
 }
+// ============================================
+//          Get User Input Function
+// ============================================
 fn get_input(prompt: &str) -> String {
     print!("{}", prompt);
-    io::stdout().flush().unwrap();
+    std::io::stdout().flush().unwrap();
     let mut input = String::new();
     io::stdin().read_line(&mut input).expect("Failed to read input");
     input.trim().to_string()
 }
-
+// ============================================
+//          Start Network Services Function
+// ============================================
 async fn start_network_services(
     websocket_stream: &WebSocketStream,
     webrtc_module: &WebRTCModule,
@@ -182,7 +213,10 @@ async fn start_network_services(
         log::log_message("Failed to initialize audio devices.");
     }
 }
- fn display_rooms_to_user(rooms: &[Room]) {
+// ============================================
+//          Display Rooms Function
+// ============================================
+fn display_rooms_to_user(rooms: &[discovery::Room]) {
     if rooms.is_empty() {
         println!("No rooms available.");
         return;
