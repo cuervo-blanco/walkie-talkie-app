@@ -21,7 +21,7 @@ async fn main() -> std::io::Result<()> {
 
     // Initialize the database connection pool
     let dp_path = "walkie_talkie_app.db";
-    let pool = db::initialize_pool(db_path);
+    let pool = db::initialize_pool(dp_path);
     db::initialize_database(&pool);
 
     // Initialize WebSocket and WebRTC modules
@@ -37,17 +37,17 @@ async fn main() -> std::io::Result<()> {
                 //          Create Room
                 // ============================================
                 let room_name = get_input("Enter room name: ");
-                let creator_device_id = get_input("Enter your ID: ");
+                let creator_device_id = get_input("Enter creator device ID: ");
                 let port: u16 = get_input("Enter port: ").parse().expect("Invalid port number");
 
                 let metadata = serde_json::json!({
                     "groups":{
                         "all": {
                             "members": {
-                                creator_device_id.to_string(): {
-                                    "admin": "true",
-                                    "online": "true",
-                                    "mute": "false"
+                                creator_device_id: {
+                                    "admin": true,
+                                    "online": true,
+                                    "mute": false
                                 },
                             }
                         },

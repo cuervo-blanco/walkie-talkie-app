@@ -4,3 +4,4 @@ pub mod discovery;
 pub mod db;
 pub mod log;
 pub mod websocket;
+pub mod metadata;
