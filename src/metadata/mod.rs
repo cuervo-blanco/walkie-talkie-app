@@ -67,3 +67,22 @@ pub fn delete_nested_metadata_key(
         }
     }
 }
+pub fn find_metadata_value<'a>(
+    metadata: &'a HashMap<String, serde_json::Value>,
+    key: &str,
+) -> Option<&'a serde_json::Value> {
+    metadata.get(key)
+}
+
+pub fn find_nested_metadata_value<'a>(
+    metadata: &'a HashMap<String, serde_json::Value>,
+    outer_key: &str,
+    inner_key: &str,
+) -> Option<&'a serde_json::Value> {
+    if let Some(outer_value) = metadata.get(outer_key) {
+        if let Some(inner_map) = outer_value.as_object() {
+            return inner_map.get(inner_key);
+        }
+    }
+    None
+}

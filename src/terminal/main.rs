@@ -8,6 +8,7 @@ use wt_tools::communication::WebRTCModule;
 use wt_tools::discovery;
 use wt_tools::db;
 use wt_tools::log;
+use wt_tools::metadata;
 use wt_tools::websocket::WebSocketStream;
 use dialoguer::{theme::ColorfulTheme, Select};
 use tokio;
@@ -44,7 +45,7 @@ async fn main() -> std::io::Result<()> {
                     "groups":{
                         "all": {
                             "members": {
-                                creator_device_id: {
+                                creator_device_id.clone(): {
                                     "admin": true,
                                     "online": true,
                                     "mute": false
@@ -54,8 +55,23 @@ async fn main() -> std::io::Result<()> {
                     },
                 });
 
-                discovery::broadcast_service(&pool, &room_name, &creator_device_id, port, metadata).unwrap();
-                start_network_services(&websocket_stream, &webrtc_module, &creator_device_id, port).await;
+                let metadata_map = metadata::json_to_metadata(&metadata.to_string());
+                discovery::broadcast_service(&pool, &room_name, &creator_device_id, port, metadata_map.clone()).unwrap();
+
+                start_network_services(&websocket_stream, &webrtc_module, &creator_device_id, port, metadata_map).await;
+
+                //========= start audio input and handling process ==========//
+                //
+                //              TODO
+                //              1. Find how to keep this process alive if the
+                //              decides to create more rooms (go to the previous
+                //              menu
+                //              2. Start audio broadcasting menu (send audio,
+                //              select group to send audio, etc.)
+                //
+                //
+                //
+                //===========================================================//
             }
             1 => {
                 // ============================================
@@ -71,8 +87,8 @@ async fn main() -> std::io::Result<()> {
                 // ============================================
                 let receiver = discovery::discover_services().unwrap();
                 let rooms = discovery::get_available_rooms(receiver);
-                let items: Vec<String> = Vec::new();
-                for room in rooms {
+                let mut items: Vec<String> = Vec::new();
+                for room in rooms.clone() {
                     items.push(room.name);
                 }
 
@@ -84,11 +100,14 @@ async fn main() -> std::io::Result<()> {
                     .unwrap();
                 if selection > 0 && selection <= rooms.len() {
                     let room = &rooms[selection - 1];
+                    let metadata = serde_json::json!(room.metadata).clone();
+                    let metadata_map = metadata::json_to_metadata(&metadata.to_string());
                     start_network_services(
                         &websocket_stream,
                         &webrtc_module,
                         &room.creator_device_id,
-                        room.port
+                        room.port,
+                        metadata_map,
                     ).await;
                 } else {
                     println!("Invalid room");
@@ -160,7 +179,17 @@ async fn start_network_services(
     webrtc_module: &WebRTCModule,
     device_id: &str,
     port: u16,
+    metadata: std::collections::HashMap<String, serde_json::Value>,
 ) {
+    let initial_groups: Vec<String> = Vec::new();
+    if let Some(groups) = metadata::find_metadata_value(&metadata, "groups") {
+        if let Some(groups_map) = groups.as_object() {
+            for (group_name, _) in groups_map {
+                initial_groups.push(group_name.clone());
+            }
+        }
+    }
+
     let server_addr = format!("{}:{}", device_id, port);
     tokio::spawn(async move {
         websocket_stream.start(&server_addr).await;
@@ -169,7 +198,7 @@ async fn start_network_services(
     let signaling_url = format!("ws://{}:{}", device_id, port);
     tokio::spawn(async move {
         // Give the initial groups
-        webrtc_module.signaling_loop(&signaling_url, "peer_id").await
+        webrtc_module.signaling_loop(&signaling_url, device_id, initial_groups).await
         .expect("Signaling loop failed");
     });
 
