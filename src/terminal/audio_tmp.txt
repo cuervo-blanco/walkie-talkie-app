@@ -1,0 +1,51 @@
+
+    let (input_device, output_device) = audio::initialize_audio_interface();
+    if let (Some(input_device), Some(output_device)) = (input_device, output_device) {
+        let input_config = audio::get_audio_config(&input_device).expect("Failed to get audio input config");
+        let output_config = audio::get_audio_config(&output_device).expect("Failed to get audio output config");
+
+        let audio_buffer = Arc::new(Mutex::new(Vec::new()));
+        let received_data = Arc::clone(&audio_buffer);
+
+        let input_stream = audio::start_input_stream(&input_device, &input_config)
+            .expect("Failed to start input stream");
+        let output_stream = audio::start_output_stream(
+                &output_device,
+                &output_config,
+                received_data.clone()
+            ).expect("Failed to start output stream");
+        let send_audio_module =  webrtc_module.clone();
+        tokio::spawn(async move {
+            loop {
+                // Encode and send audio data
+                let buffer = audio_buffer.lock().unwrap();
+                if !buffer.is_empty() {
+                    // Replace withactual WebRTC send function
+                    let opus_data = audio::convert_audio_stream_to_opus(&buffer)
+                        .expect("Failed to encode audio");
+                    send_audio_module.send_audio(Ok(opus_data), "group").await
+                        .expect("Failed to send audio");
+                }
+            }
+        });
+
+        audio::stop_audio_stream(input_stream);
+        audio::stop_audio_stream(output_stream);
+}
+else {
+        log::log_message("Failed to initialize audio devices.");
+    }
+
+
+    let server_addr = format!("{}:{}", device_id, port);
+    tokio::spawn(async move {
+        websocket_stream.start(&server_addr).await;
+    });
+
+    let signaling_url = format!("ws://{}:{}", device_id, port);
+    tokio::spawn(async move {
+        // Give the initial groups
+        webrtc_module.signaling_loop(&signaling_url, device_id, initial_groups).await
+        .expect("Signaling loop failed");
+    });
+

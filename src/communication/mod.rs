@@ -47,6 +47,7 @@ pub struct WebRTCModule {
     // Peer Groups: <PeerId, Group Membership>
     peer_groups: HashMap<String, Vec<String>>,
     ws_sink: Option<Arc<Mutex<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::Message>>>>,
+    #[allow(dead_code)]
     pool: db::SqlitePool
 }
 
@@ -281,7 +282,7 @@ impl WebRTCModule {
                                 let new_groups: Vec<String> = parts[2].split(',')
                                     .map(|s| s.to_string()).collect();
                                 self.peer_groups.insert(
-                                    remote_peer_id.clone().to_string(), new_groups.clone()
+                                    remote_peer_id.to_string(), new_groups.clone()
                                 );
                             }
                             _ => {}

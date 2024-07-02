@@ -165,6 +165,7 @@ pub fn get_available_rooms(receiver: Receiver<ServiceEvent>) -> Vec<Room> {
 // ============================================
 //       Convert TxtProperties to HashMap
 // ============================================
+#[allow(dead_code)]
 fn txt_properties_to_hash_map(txt_properties: &TxtProperties) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for txt_property in txt_properties.iter() {

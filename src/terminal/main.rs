@@ -3,6 +3,7 @@
 // ============================================
 use std::io;
 use std::io::Write;
+#[allow(unused_imports)]
 use wt_tools::audio;
 use wt_tools::communication::WebRTCModule;
 use wt_tools::discovery;
@@ -12,13 +13,15 @@ use wt_tools::metadata;
 use wt_tools::websocket::WebSocketStream;
 use dialoguer::{theme::ColorfulTheme, Select};
 use tokio;
+use tokio::time::{sleep, Duration};
+#[allow(unused_imports)]
 use std::sync::{Arc, Mutex};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     // Initialize the logger
     log::log_message("Application Started");
-    title_card();
+    title_card().await;
 
     // Initialize the database connection pool
     let dp_path = "walkie_talkie_app.db";
@@ -54,6 +57,7 @@ async fn main() -> std::io::Result<()> {
                         },
                     },
                 });
+                // Save info to database
 
                 let metadata_map = metadata::json_to_metadata(&metadata.to_string());
                 discovery::broadcast_service(&pool, &room_name, &creator_device_id, port, metadata_map.clone()).unwrap();
@@ -131,13 +135,30 @@ async fn main() -> std::io::Result<()> {
 // ============================================
 //          Title Card Function
 // ============================================
-fn title_card() {
+async fn title_card() {
+    println!("");
+    sleep(Duration::from_millis(100)).await;
+    println!("");
+    sleep(Duration::from_millis(100)).await;
+    println!("");
+    sleep(Duration::from_millis(100)).await;
     println!("██╗    ██╗ █████╗ ██╗     ██╗  ██╗██╗███████╗    ████████╗ █████╗ ██╗     ██╗  ██╗██╗███████╗");
+    sleep(Duration::from_millis(100)).await;
     println!("██║    ██║██╔══██╗██║     ██║ ██╔╝██║██╔════╝    ╚══██╔══╝██╔══██╗██║     ██║ ██╔╝██║██╔════╝");
+    sleep(Duration::from_millis(100)).await;
     println!("██║ █╗ ██║███████║██║     █████╔╝ ██║█████╗         ██║   ███████║██║     █████╔╝ ██║█████╗");
+    sleep(Duration::from_millis(100)).await;
     println!("██║███╗██║██╔══██║██║     ██╔═██╗ ██║██╔══╝         ██║   ██╔══██║██║     ██╔═██╗ ██║██╔══╝");
+    sleep(Duration::from_millis(100)).await;
     println!("╚███╔███╔╝██║  ██║███████╗██║  ██╗██║███████╗       ██║   ██║  ██║███████╗██║  ██╗██║███████╗");
+    sleep(Duration::from_millis(100)).await;
     println!(" ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝       ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝");
+    sleep(Duration::from_millis(100)).await;
+    println!("");
+    sleep(Duration::from_millis(100)).await;
+    println!("");
+    sleep(Duration::from_millis(100)).await;
+    println!("");
 
 }
 // ============================================
@@ -175,71 +196,19 @@ fn get_input(prompt: &str) -> String {
 //          Start Network Services Function
 // ============================================
 async fn start_network_services(
-    websocket_stream: &WebSocketStream,
-    webrtc_module: &WebRTCModule,
-    device_id: &str,
-    port: u16,
+    _websocket_stream: &WebSocketStream,
+    _webrtc_module: &WebRTCModule,
+    _device_id: &str,
+    _port: u16,
     metadata: std::collections::HashMap<String, serde_json::Value>,
 ) {
-    let initial_groups: Vec<String> = Vec::new();
+    let mut initial_groups: Vec<String> = Vec::new();
     if let Some(groups) = metadata::find_metadata_value(&metadata, "groups") {
         if let Some(groups_map) = groups.as_object() {
             for (group_name, _) in groups_map {
                 initial_groups.push(group_name.clone());
             }
         }
-    }
-
-    let server_addr = format!("{}:{}", device_id, port);
-    tokio::spawn(async move {
-        websocket_stream.start(&server_addr).await;
-    });
-
-    let signaling_url = format!("ws://{}:{}", device_id, port);
-    tokio::spawn(async move {
-        // Give the initial groups
-        webrtc_module.signaling_loop(&signaling_url, device_id, initial_groups).await
-        .expect("Signaling loop failed");
-    });
-
-    let (input_device, output_device) = audio::initialize_audio_interface();
-    if let (Some(input_device), Some(output_device)) = (input_device, output_device) {
-        let input_config = audio::get_audio_config(&input_device).expect("Failed to get audio input config");
-        let output_config = audio::get_audio_config(&output_device).expect("Failed to get audio output config");
-
-        let audio_buffer = Arc::new(Mutex::new(Vec::new()));
-        let received_data = Arc::clone(&audio_buffer);
-
-        let input_stream = audio::start_input_stream(&input_device, &input_config)
-            .expect("Failed to start input stream");
-        let output_stream = audio::start_output_stream(
-                &output_device,
-                &output_config,
-                received_data.clone()
-            ).expect("Failed to start output stream");
-
-        // Simulate sending audio data
-        let send_audio_module =  webrtc_module.clone();
-        tokio::spawn(async move {
-            loop {
-                // Encode and send audio data
-                let buffer = audio_buffer.lock().unwrap();
-                if !buffer.is_empty() {
-                    // Replace withactual WebRTC send function
-                    let opus_data = audio::convert_audio_stream_to_opus(&buffer)
-                        .expect("Failed to encode audio");
-                    send_audio_module.send_audio(Ok(opus_data), "group").await
-                        .expect("Failed to send audio");
-                }
-            }
-        });
-
-        // Stop the audio streams on exit
-        tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
-        audio::stop_audio_stream(input_stream);
-        audio::stop_audio_stream(output_stream);
-    } else {
-        log::log_message("Failed to initialize audio devices.");
     }
 }
 // ============================================

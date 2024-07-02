@@ -18,6 +18,7 @@ type PeerMap = Arc<Mutex<HashMap<String, Arc<Mutex<SplitSink<tokio_tungstenite::
 // ============================================
 //                 Structures
 // ============================================
+#[allow(dead_code)]
 pub struct WebSocketStream {
     peer_map: PeerMap,
     pool: db::SqlitePool
@@ -76,6 +77,7 @@ impl WebSocketStream {
     // ============================================
     //            Database Operations
     // ============================================
+    #[allow(dead_code)]
     async fn save_user_to_db(&self, room: discovery::Room) {
         db::store_room_info(&self.pool, &room);
     }
