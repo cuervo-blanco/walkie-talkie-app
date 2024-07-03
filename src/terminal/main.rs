@@ -32,10 +32,12 @@ async fn main() -> std::io::Result<()> {
     let websocket_stream = WebSocketStream::new(pool.clone());
     let webrtc_module = WebRTCModule::new(&pool).await.unwrap();
 
+    let running_rooms = Arc::new(Mutex::new(Vec::new()));
+
     loop {
         // Display the main menu
-        let selection = main_menu();
-        match selection.await {
+        let selection = main_menu().await;
+        match selection {
             0 => {
                 // ============================================
                 //          Create Room
@@ -75,18 +77,10 @@ async fn main() -> std::io::Result<()> {
                         metadata_map).await;
                 });
 
-                //========= start audio input and handling process ==========//
-                //
-                //              TODO
-                //              1. Find how to keep this process alive if the
-                //              decides to create more rooms (go to the previous
-                //              menu
-                //              2. Start audio broadcasting menu (send audio,
-                //              select group to send audio, etc.)
-                //
-                //
-                //
-                //===========================================================//
+                running_rooms.lock().unwrap().push(room_task);
+
+                room_menu().await;
+
             }
             1 => {
                 // ============================================
@@ -248,5 +242,45 @@ fn display_rooms_to_user(rooms: &[discovery::Room]) {
     println!("Available rooms:");
     for (index, room) in rooms.iter().enumerate() {
         println!("{}: {} at {}:{}", index + 1, room.name, room.address, room.port);
+    }
+}
+
+// ============================================
+//          Room Menu Function
+// ============================================
+async fn room_menu() {
+    loop {
+        let selections = &[
+            "Select Group",
+            "Create Group",
+            "Back to Main Menu",
+        ];
+
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Room Menu")
+            .default(0)
+            .items(&selections[..])
+            .interact()
+            .unwrap();
+
+        match selection {
+            0 => {
+                // TODO: Display available groups
+                // TODO: Send Audio to Group
+                // TODO: Implement send audio to group
+                todo!()
+            }
+            1 => {
+                // Create Group
+                // TODO: Implement creating group (check if user has creation permits)
+                todo!()
+            }
+            2 => {
+                break;
+            }
+            _ => {
+                println!("Invalid choice");
+            }
+        }
     }
 }
