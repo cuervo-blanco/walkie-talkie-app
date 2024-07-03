@@ -33,9 +33,9 @@ async fn main() -> std::io::Result<()> {
     let webrtc_module = WebRTCModule::new(&pool).await.unwrap();
 
     loop {
-        // Display the menu
+        // Display the main menu
         let selection = main_menu();
-        match selection {
+        match selection.await {
             0 => {
                 // ============================================
                 //          Create Room
@@ -62,7 +62,18 @@ async fn main() -> std::io::Result<()> {
                 let metadata_map = metadata::json_to_metadata(&metadata.to_string());
                 discovery::broadcast_service(&pool, &room_name, &creator_device_id, port, metadata_map.clone()).unwrap();
 
-                start_network_services(&websocket_stream, &webrtc_module, &creator_device_id, port, metadata_map).await;
+                let websocket_stream_clone = websocket_stream.clone();
+                let webrtc_module_clone = webrtc_module.clone();
+                let creator_device_id_clone = creator_device_id.clone();
+
+                let room_task = tokio::spawn(async move {
+                    start_network_services(
+                        &websocket_stream_clone,
+                        &webrtc_module_clone,
+                        &creator_device_id_clone,
+                        port,
+                        metadata_map).await;
+                });
 
                 //========= start audio input and handling process ==========//
                 //
@@ -153,24 +164,31 @@ async fn title_card() {
     println!("╚███╔███╔╝██║  ██║███████╗██║  ██╗██║███████╗       ██║   ██║  ██║███████╗██║  ██╗██║███████╗");
     sleep(Duration::from_millis(100)).await;
     println!(" ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝       ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝");
-    sleep(Duration::from_millis(100)).await;
-    println!("");
-    sleep(Duration::from_millis(100)).await;
-    println!("");
-    sleep(Duration::from_millis(100)).await;
-    println!("");
-
+    repeat_println("", 20, 100).await;
 }
 // ============================================
 //          Main Menu Function
 // ============================================
-fn main_menu() -> usize {
+
+async fn repeat_println(line: &str, times: u16, duration: u64) {
+    for _ in 0..times {
+    sleep(Duration::from_millis(duration)).await;
+    println!("{}", line);
+    }
+}
+
+async fn main_menu() -> usize {
     let selections = &[
         "Create Room",
         "Discover Rooms",
         "Join Rooms",
         "Exit"
     ];
+
+    // Display each item with a delay
+    // display_with_delay(selections, 100).await;
+
+    print!("{}[2J", 27 as char);
 
     let selection = Select::with_theme(&ColorfulTheme::default())
         .with_prompt("Select an option")
@@ -181,6 +199,13 @@ fn main_menu() -> usize {
 
     return selection
 
+}
+#[allow(dead_code)]
+async fn display_with_delay(items: &[&str], delay_ms: u64) {
+    for item in items {
+        println!("{}", item);
+        sleep(Duration::from_millis(delay_ms)).await;
+    }
 }
 // ============================================
 //          Get User Input Function

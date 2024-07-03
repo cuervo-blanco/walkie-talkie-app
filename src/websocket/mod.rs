@@ -19,6 +19,7 @@ type PeerMap = Arc<Mutex<HashMap<String, Arc<Mutex<SplitSink<tokio_tungstenite::
 //                 Structures
 // ============================================
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct WebSocketStream {
     peer_map: PeerMap,
     pool: db::SqlitePool

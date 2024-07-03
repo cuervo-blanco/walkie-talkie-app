@@ -36,10 +36,11 @@ use crate::db;
 
 pub struct Destination;
 
+#[derive(Clone)]
 pub struct WebRTCModule {
-    api: webrtc::api::API,
+    api: Arc<Mutex<webrtc::api::API>>,
     // Peer Connections: <Name, PeerConnection>
-    peer_connections: HashMap<String, RTCPeerConnection>,
+    peer_connections: Arc<Mutex<HashMap<String, RTCPeerConnection>>>,
     // Audio Data Channels: <Group, DataChannel>
     audio_data_channels: HashMap<String, Vec<Arc<RTCDataChannel>>>,
     audio_sending_active: Arc<Mutex<bool>>,
@@ -61,8 +62,8 @@ impl WebRTCModule {
         let api = create_api().await?;
 
         Ok(Self{
-            api,
-            peer_connections: HashMap::new(),
+            api : Arc::new(Mutex::new(api)),
+            peer_connections: Arc::new(Mutex::new(HashMap::new())),
             audio_data_channels: HashMap::new(),
             audio_sending_active: Arc::new(Mutex::new(true)),
             audio_receiving_active: Arc::new(Mutex::new(true)),
@@ -162,7 +163,8 @@ impl WebRTCModule {
                 ).await?;
 
                 let offer_sdp = create_offer(&peer_connection).await?;
-                self.peer_connections.insert(peer.clone(), peer_connection);
+                let mut peer_connections = self.peer_connections.lock().await;
+                peer_connections.insert(peer.clone(), peer_connection);
 
                 let mut sink = ws_sink.lock().await;
                 sink.send(Message::Text(
@@ -196,7 +198,8 @@ impl WebRTCModule {
                         ).await?;
 
                         let offer_sdp = create_offer(&peer_connection).await?;
-                        self.peer_connections.insert(
+                        let mut peer_connections = self.peer_connections.lock().await;
+                        peer_connections.insert(
                             new_peer_id.to_string(),
                             peer_connection
                         );
@@ -236,7 +239,8 @@ impl WebRTCModule {
                                 ).await?;
 
                                 let answer_sdp = create_answer(&peer_connection).await?;
-                                self.peer_connections.insert(
+                                let mut peer_connections = self.peer_connections.lock().await;
+                                peer_connections.insert(
                                     remote_peer_id.to_string(),
                                     peer_connection
                                 );
@@ -250,8 +254,8 @@ impl WebRTCModule {
                             }
                             "answer" => {
                                 let sdp = parts[2];
-
-                                if let Some(peer_connection) = self.peer_connections
+                                let mut peer_connections = self.peer_connections.lock().await;
+                                if let Some(peer_connection) = peer_connections
                                     .get_mut(remote_peer_id) {
                                     set_remote_description(
                                         &peer_connection,
@@ -270,7 +274,8 @@ impl WebRTCModule {
                                     username_fragment: None,
                                 };
                                 // Add ICE Candidate to the peer_connection
-                                if let Some(peer_connection) = self.peer_connections
+                                let mut peer_connections = self.peer_connections.lock().await;
+                                if let Some(peer_connection) = peer_connections
                                     .get_mut(remote_peer_id) {
                                     add_ice_candidate(
                                         peer_connection,
@@ -379,7 +384,7 @@ impl WebRTCModule {
 //            Helper Functions
 // ============================================
 async fn create_peer_connection(
-    api: &webrtc::api::API,
+    api: &Arc<Mutex<webrtc::api::API>>,
     audio_data_channels: &mut HashMap<String, Vec<Arc<RTCDataChannel>>>,
     signaling_sender: mpsc::Sender<Message>,
     peer_id: String,
@@ -387,6 +392,7 @@ async fn create_peer_connection(
     groups: Vec<String>,
 ) -> Result<RTCPeerConnection, Error> {
     let config = create_rtc_configuration();
+    let api = api.lock().await;
     let peer_connection = api.new_peer_connection(config).await?;
 
     // Handle ICE candidates
