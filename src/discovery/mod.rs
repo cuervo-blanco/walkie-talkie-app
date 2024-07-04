@@ -3,12 +3,16 @@
 // ============================================
 // mDNS or custom discovery
 #[allow(unused_imports)]
-use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent, Error, TxtProperties, TxtProperty};
+use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
-use std::collections::HashMap;
+#[allow(unused_imports)]
 use std::net::{IpAddr, Ipv4Addr};
+#[allow(unused_imports)]
+use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent, Error, TxtProperties, TxtProperty};
 use crate::db;
+use if_addrs::get_if_addrs;
+use dialoguer::{Select, theme::ColorfulTheme};
 
 // ============================================
 //                 Structures
@@ -33,10 +37,10 @@ pub fn start_mdns_responder() -> Result<ServiceDaemon, Error> {
 //            Broadcast Service
 // ============================================
 pub fn broadcast_service(
+    service_daemon: mdns_sd::ServiceDaemon,
     pool: &db::SqlitePool,
     room_name: &str,
     creator_device_id: &str,
-    port: u16,
     metadata: HashMap<String, serde_json::Value>,
 ) -> Result<ServiceInfo, Box<dyn std::error::Error>> {
     // Serialize metadata to JSON string
@@ -46,42 +50,72 @@ pub fn broadcast_service(
     let mut txt_properties = HashMap::new();
     txt_properties.insert("metadata".to_string(), metadata_str);
 
+    let mdns = service_daemon;
+
     // Create ServiceInfo Object
-    let service_name = format!("{}_{}", room_name, creator_device_id);
-    let service_type = "_http._tcp.local"; // Service type for mDNS
-    let hostname = format!("{}.local.", creator_device_id);
+    let service_type = "_http._tcp.local."; // Service type for mDNS
+    let service_name = format!("{}_by_{}", room_name.to_lowercase(), creator_device_id.to_lowercase());
+    let hostname = format!("{}.local.", creator_device_id.to_lowercase());
+    let port = 8080;
     let instance_name = room_name.to_string();
 
+    println!("Creating ServiceInfo with the following parameters:");
+    println!("Service Type: {}", service_type);
+    println!("Service Name: {}", service_name);
+    println!("Hostname: {}", hostname);
+    println!("Instance Name: {}", instance_name);
+    println!("Port: {}", port);
+
+    let ip_address = match select_network_interface() {
+        Some(ip) => ip,
+        None => {
+            eprintln!("Error: unable to get local IP address");
+            return Err(
+                Box::new(
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Unable to get local IP address")
+                )
+            );
+        }
+    };
+
+    println!("Selected IP address: {}", ip_address);
 
     // Create ServiceInfo Object
-    let service_info = ServiceInfo::new(
+    let room_service_info = ServiceInfo::new(
         &service_type,
         &service_name,
         &hostname,
         &instance_name,
         port,
-        txt_properties
-    )?;
+        txt_properties,
+    ).map_err(|e| {
+            eprintln!("Error creating ServiceInfo: {}", e);
+            e
+        })?;
+
 
     // Register service with mDNS Responder
-    let responder = start_mdns_responder()?;
-    responder.register(service_info.clone())?;
+    mdns.register(room_service_info.clone())?;
+    println!("Service registered successfully.");
 
     // Create Room Object for database storage
     let room = Room {
         name: room_name.to_string(),
-        address: get_local_ip_address().unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)), //Replace with actual address retrieval
+        address: ip_address,
         port,
         creator_device_id: creator_device_id.to_string(),
         metadata,
     };
     db::store_room_info(pool, &room);
 
-    Ok(service_info)
+    Ok(room_service_info)
 }
 
+#[allow(dead_code)]
 fn get_local_ip_address() -> Option<IpAddr> {
-    let ifaces = if_addrs::get_if_addrs().unwrap();
+    let ifaces = if_addrs::get_if_addrs().ok()?;
     for iface in ifaces {
         if iface.is_loopback() {
             continue;
@@ -90,6 +124,30 @@ fn get_local_ip_address() -> Option<IpAddr> {
     }
     None
 }
+
+fn select_network_interface() -> Option<IpAddr> {
+    let ifaces = get_if_addrs().ok()?;
+    let non_loopback_ifaces: Vec<_> = ifaces
+        .into_iter()
+        .filter(|iface| !iface.is_loopback())
+        .collect();
+
+    let iface_names: Vec<_> = non_loopback_ifaces
+        .iter()
+        .map(|iface| iface.name.clone())
+        .collect();
+
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Select a network interface")
+        .default(0)
+        .items(&iface_names)
+        .interact()
+        .unwrap();
+
+    let selected_iface = &non_loopback_ifaces[selection];
+    Some(selected_iface.addr.ip())
+}
+
 
 // ============================================
 //            Load and Broadcast Services

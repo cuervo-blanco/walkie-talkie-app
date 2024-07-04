@@ -31,6 +31,7 @@ async fn main() -> std::io::Result<()> {
     // Initialize WebSocket and WebRTC modules
     let websocket_stream = WebSocketStream::new(pool.clone());
     let webrtc_module = WebRTCModule::new(&pool).await.unwrap();
+    let mdns = discovery::start_mdns_responder().unwrap();
 
     let running_rooms = Arc::new(Mutex::new(Vec::new()));
 
@@ -43,8 +44,7 @@ async fn main() -> std::io::Result<()> {
                 //          Create Room
                 // ============================================
                 let room_name = get_input("Enter room name: ");
-                let creator_device_id = get_input("Enter creator device ID: ");
-                let port: u16 = get_input("Enter port: ").parse().expect("Invalid port number");
+                let creator_device_id = get_input("Enter your username: ");
 
                 let metadata = serde_json::json!({
                     "groups":{
@@ -62,7 +62,7 @@ async fn main() -> std::io::Result<()> {
                 // Save info to database
 
                 let metadata_map = metadata::json_to_metadata(&metadata.to_string());
-                discovery::broadcast_service(&pool, &room_name, &creator_device_id, port, metadata_map.clone()).unwrap();
+                discovery::broadcast_service(mdns.clone(), &pool, &room_name, &creator_device_id, metadata_map.clone()).unwrap();
 
                 let websocket_stream_clone = websocket_stream.clone();
                 let webrtc_module_clone = webrtc_module.clone();
@@ -73,7 +73,7 @@ async fn main() -> std::io::Result<()> {
                         &websocket_stream_clone,
                         &webrtc_module_clone,
                         &creator_device_id_clone,
-                        port,
+                        8080,
                         metadata_map).await;
                 });
 
@@ -158,7 +158,7 @@ async fn title_card() {
     println!("╚███╔███╔╝██║  ██║███████╗██║  ██╗██║███████╗       ██║   ██║  ██║███████╗██║  ██╗██║███████╗");
     sleep(Duration::from_millis(100)).await;
     println!(" ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝       ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝");
-    repeat_println("", 20, 100).await;
+    repeat_println("", 15, 100).await;
 }
 // ============================================
 //          Main Menu Function
