@@ -33,6 +33,7 @@ async fn main() -> std::io::Result<()> {
     let webrtc_module = WebRTCModule::new(&pool).await.unwrap();
     let mdns = discovery::start_mdns_responder().unwrap();
 
+    // considerar usar HashMap
     let running_rooms = Arc::new(Mutex::new(Vec::new()));
 
     loop {
