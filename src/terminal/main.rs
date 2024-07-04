@@ -47,6 +47,7 @@ async fn main() -> std::io::Result<()> {
                 let room_name = get_input("Enter room name: ");
                 let creator_device_id = get_input("Enter your username: ");
 
+
                 let metadata = serde_json::json!({
                     "groups":{
                         "all": {
@@ -63,19 +64,27 @@ async fn main() -> std::io::Result<()> {
                 // Save info to database
 
                 let metadata_map = metadata::json_to_metadata(&metadata.to_string());
-                discovery::broadcast_service(mdns.clone(), &pool, &room_name, &creator_device_id, metadata_map.clone()).unwrap();
+                let (_, ip_address) = discovery::broadcast_service(
+                    mdns.clone(),
+                    &pool,
+                    &room_name,
+                    &creator_device_id,
+                    metadata_map.clone()
+                ).unwrap();
 
                 let websocket_stream_clone = websocket_stream.clone();
-                let webrtc_module_clone = webrtc_module.clone();
+                let mut webrtc_module_clone = webrtc_module.clone();
                 let creator_device_id_clone = creator_device_id.clone();
+                let addr = format!("{}:8080", ip_address); // Use the selected network interface here
 
                 let room_task = tokio::spawn(async move {
-                    start_network_services(
-                        &websocket_stream_clone,
-                        &webrtc_module_clone,
+                    websocket_stream_clone.start(&addr).await;
+                    let ws_addr = format!("ws://{}", addr);
+                    webrtc_module_clone.signaling_loop(
+                        &ws_addr,
                         &creator_device_id_clone,
-                        8080,
-                        metadata_map).await;
+                        vec!["all".to_string()]
+                    ).await.unwrap();
                 });
 
                 running_rooms.lock().unwrap().push(room_task);
@@ -216,10 +225,10 @@ fn get_input(prompt: &str) -> String {
 //          Start Network Services Function
 // ============================================
 async fn start_network_services(
-    _websocket_stream: &WebSocketStream,
-    _webrtc_module: &WebRTCModule,
-    _device_id: &str,
-    _port: u16,
+    websocket_stream: &WebSocketStream,
+    webrtc_module: &WebRTCModule,
+    device_id: &str,
+    port: u16,
     metadata: std::collections::HashMap<String, serde_json::Value>,
 ) {
     let mut initial_groups: Vec<String> = Vec::new();
@@ -230,6 +239,11 @@ async fn start_network_services(
             }
         }
     }
+
+    let mut webrtc_module = webrtc_module.clone();
+    let addr = format!("0.0.0.0:{}", port);
+    websocket_stream.start(&addr).await;
+    webrtc_module.signaling_loop(&format!("ws://0.0.0.0:{}", port), device_id, initial_groups).await.unwrap();
 }
 // ============================================
 //          Display Rooms Function

@@ -42,7 +42,7 @@ pub fn broadcast_service(
     room_name: &str,
     creator_device_id: &str,
     metadata: HashMap<String, serde_json::Value>,
-) -> Result<ServiceInfo, Box<dyn std::error::Error>> {
+) -> Result<(ServiceInfo, IpAddr), Box<dyn std::error::Error>> {
     // Serialize metadata to JSON string
     let metadata_str = serde_json::to_string(&metadata)?;
 
@@ -53,19 +53,22 @@ pub fn broadcast_service(
     let mdns = service_daemon;
 
     // Create ServiceInfo Object
-    let service_type = "_http._tcp.local."; // Service type for mDNS
+    let service_type_webrtc = "_webrtc._udp.local."; // WebRTC over UDP
+    let service_type_websocket = "_ws._tcp.local."; // WebSocket over TCP
     let service_name = format!("{}_by_{}", room_name.to_lowercase(), creator_device_id.to_lowercase());
     let hostname = format!("{}.local.", creator_device_id.to_lowercase());
-    let port = 8080;
+    let port: u16 = 8080;
     let instance_name = room_name.to_string();
 
     println!("Creating ServiceInfo with the following parameters:");
-    println!("Service Type: {}", service_type);
+    println!("Service Type (WebRTC): {}", service_type_webrtc);
+    println!("Service Type (WebSocket): {}", service_type_websocket);
     println!("Service Name: {}", service_name);
     println!("Hostname: {}", hostname);
     println!("Instance Name: {}", instance_name);
     println!("Port: {}", port);
 
+    // Allow the user to select a network interface
     let ip_address = match select_network_interface() {
         Some(ip) => ip,
         None => {
@@ -82,22 +85,35 @@ pub fn broadcast_service(
 
     println!("Selected IP address: {}", ip_address);
 
+    // Convert IP adress to a slice
+    let ip_addresses = vec![ip_address];
+
     // Create ServiceInfo Object
-    let room_service_info = ServiceInfo::new(
-        &service_type,
+    let room_service_info_webrtc = ServiceInfo::new(
+        &service_type_webrtc,
         &service_name,
         &hostname,
-        &instance_name,
+        ip_addresses.as_slice(),
         port,
-        txt_properties,
+        txt_properties.clone(),
     ).map_err(|e| {
-            eprintln!("Error creating ServiceInfo: {}", e);
+            eprintln!("Error creating ServiceInfo (WebRTC): {}", e);
             e
         })?;
 
+    let room_service_info_websocket = ServiceInfo::new(
+        &service_type_websocket,
+        &service_name,
+        &hostname,
+        ip_addresses.as_slice(),
+        port,
+        txt_properties,
+    )?;
+
 
     // Register service with mDNS Responder
-    mdns.register(room_service_info.clone())?;
+    mdns.register(room_service_info_webrtc.clone())?;
+    mdns.register(room_service_info_websocket.clone())?;
     println!("Service registered successfully.");
 
     // Create Room Object for database storage
@@ -110,7 +126,7 @@ pub fn broadcast_service(
     };
     db::store_room_info(pool, &room);
 
-    Ok(room_service_info)
+    Ok((room_service_info_webrtc, ip_address))
 }
 
 #[allow(dead_code)]
@@ -129,7 +145,7 @@ fn select_network_interface() -> Option<IpAddr> {
     let ifaces = get_if_addrs().ok()?;
     let non_loopback_ifaces: Vec<_> = ifaces
         .into_iter()
-        .filter(|iface| !iface.is_loopback())
+        .filter(|iface| !iface.is_loopback() && matches!(iface.addr, if_addrs::IfAddr::V4(_)))
         .collect();
 
     let iface_names: Vec<_> = non_loopback_ifaces
@@ -145,7 +161,10 @@ fn select_network_interface() -> Option<IpAddr> {
         .unwrap();
 
     let selected_iface = &non_loopback_ifaces[selection];
-    Some(selected_iface.addr.ip())
+    match selected_iface.addr.ip() {
+        std::net::IpAddr::V4(ipv4) => Some(std::net::IpAddr::V4(ipv4)),
+        _ => None,
+    }
 }
 
 
@@ -158,24 +177,37 @@ pub fn load_and_broadcast_services(pool: &db::SqlitePool)
     let responder = start_mdns_responder()?;
 
     for room in rooms {
-        let service_name = format!("{}_{}", room.name, room.creator_device_id);
-        let service_type = "_http._tcp.local"; // Service type for mDNS
+        let service_name = format!("{}_by_{}", room.name, room.creator_device_id);
+        let service_type_webrtc = "_webrtc._udp.local.";
+        let service_type_websocket = "_ws._tcp.local.";
         let hostname = format!("{}.local.", room.creator_device_id);
-        let instance_name = room.name.clone();
         let metadata = HashMap::new(); // Add actual properties
 
-    let service_info = ServiceInfo::new(
-        &service_type,
-        &service_name,
-        &hostname,
-        &instance_name,
-        room.port,
-        metadata,
-    )?;
+        // Convert IP addresss to a slice
+        let ip_addresses = vec![room.address];
 
-    responder.register(service_info.clone())?;
-    }
-    Ok(())
+        let service_info_webrtc = ServiceInfo::new(
+            &service_type_webrtc,
+            &service_name,
+            &hostname,
+            ip_addresses.as_slice(),
+            room.port,
+            metadata.clone(),
+        )?;
+
+        let service_info_websocket = ServiceInfo::new(
+            &service_type_websocket,
+            &service_name,
+            &hostname,
+            ip_addresses.as_slice(),
+            room.port,
+            metadata.clone(),
+        )?;
+
+        responder.register(service_info_webrtc.clone())?;
+        responder.register(service_info_websocket.clone())?;
+        }
+        Ok(())
 }
 // ============================================
 //            Discover Services
@@ -184,11 +216,20 @@ pub fn discover_services() -> Result<Receiver<mdns_sd::ServiceEvent>, Box<dyn st
     let responder = start_mdns_responder()?;
     let (sender, receiver) = mpsc::channel();
 
-    let service_discovery = responder.browse("_http._tcp.local").unwrap();
+    let service_discovery_webrtc = responder.browse("_webrtc.udp.local.").unwrap();
+    let service_discovery_websocket = responder.browse("_ws._tcp.local.").unwrap();
 
     std::thread::spawn(move || {
         loop {
-            match service_discovery.recv() {
+            match service_discovery_webrtc.recv() {
+                Ok(event) => {
+                    if sender.send(event).is_err() {
+                        break;
+                    }
+                },
+                Err(_) => break,
+            }
+            match service_discovery_websocket.recv() {
                 Ok(event) => {
                     if sender.send(event).is_err() {
                         break;
