@@ -4,21 +4,17 @@
 
 #Function to display usage information
 usage(){
-    echo "Usage: $0 --bin <binary-name>"
+    echo "Usage: $0 <binary-name>"
     exit 1
 }
 
 # Check if the correct number of arguments is provided
-if [ "$#" -ne 2 ]; then
+if [ "$#" -ne 1 ]; then
     usage
 fi
 
 # Parse arguments
-if [ "$1" == "--bin" ]; then
-    BIN_NAME=$2
-else
-    usage
-fi
+BIN_NAME=$1
 
 # Ensure we are in the correct directory
 if [ ! -f "Cargo.toml" ]; then
@@ -27,9 +23,9 @@ if [ ! -f "Cargo.toml" ]; then
     exit 1
 fi
 
-# Build the projecto
+# Build the project
 echo "Building the project..."
-cargo build
+cargo build --bin $BIN_NAME
 
 # Check if the build was sucessful
 if [ $? -ne 0 ]; then
@@ -39,7 +35,7 @@ fi
 
 # Run the specified binary
 echo "Running the binary: $BIN_NAME"
-cargo run --bin #BIN_NAME
+cargo run --bin $BIN_NAME
 
 #Check if the run was successful
 if [ $? -ne 0 ]; then
