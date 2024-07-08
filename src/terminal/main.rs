@@ -47,10 +47,13 @@ async fn main() -> std::io::Result<()> {
                 let room_name = get_input("Enter room name: ");
                 let creator_device_id = get_input("Enter your username: ");
 
-
                 let metadata = serde_json::json!({
+                    // List of all groups
                     "groups":{
+                        // Groups names
+                        // The all group will contain everyone by default
                         "all": {
+                            // Members of the group
                             "members": {
                                 creator_device_id.clone(): {
                                     "admin": true,
