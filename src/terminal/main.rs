@@ -66,8 +66,17 @@ async fn main() -> std::io::Result<()> {
                     },
                 });
                 
-                // Save info to database
+                // Generate random port number
+                fn generate_port_number() -> u16 {
+                    let mut rng = rand::thread_rng();
+                    rng.gen_range(0..=65535)
+                }
+                let port = generate_port_number();
 
+                //----TODO----//
+                // Check how we can know if the port is available
+
+                // Save info to database
                 //Convert the metadata into a hashmap
                 let metadata_map = metadata::json_to_metadata(&metadata.to_string());
                 let (_, ip_address) = discovery::broadcast_service(
@@ -75,19 +84,14 @@ async fn main() -> std::io::Result<()> {
                     &pool,
                     &room_name,
                     &creator_device_id,
-                    metadata_map.clone()
+                    metadata_map.clone(),
+                    port
                 ).unwrap();
 
                 let websocket_stream_clone = websocket_stream.clone();
                 let mut webrtc_module_clone = webrtc_module.clone();
                 let creator_device_id_clone = creator_device_id.clone();
 
-                // Generate random port number
-                fn generate_port_number() -> u16 {
-                    let mut rng = rand::thread_rng();
-                    rng.gen_range(0..=65535)
-                }
-                let port = generate_port_number();
                 let addr = format!("{}:{}", ip_address, port); // Use the selected network interface here
 
                 let room_task = tokio::spawn(async move {
@@ -256,7 +260,10 @@ async fn start_network_services(
     let mut webrtc_module = webrtc_module.clone();
     let addr = format!("0.0.0.0:{}", port);
     websocket_stream.start(&addr).await;
-    webrtc_module.signaling_loop(&format!("ws://0.0.0.0:{}", port), device_id, initial_groups).await.unwrap();
+    webrtc_module.signaling_loop(
+        &format!("ws://0.0.0.0:{}", port), 
+        device_id, 
+        initial_groups).await.unwrap();
 }
 // ============================================
 //          Display Rooms Function

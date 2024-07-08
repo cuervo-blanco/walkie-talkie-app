@@ -42,6 +42,7 @@ pub fn broadcast_service(
     room_name: &str,
     creator_device_id: &str,
     metadata: HashMap<String, serde_json::Value>,
+    port: u16
 ) -> Result<(ServiceInfo, IpAddr), Box<dyn std::error::Error>> {
     // Serialize metadata to JSON string
     let metadata_str = serde_json::to_string(&metadata)?;
@@ -57,7 +58,6 @@ pub fn broadcast_service(
     let service_type_websocket = "_ws._tcp.local."; // WebSocket over TCP
     let service_name = format!("{}_by_{}", room_name.to_lowercase(), creator_device_id.to_lowercase());
     let hostname = format!("{}.local.", creator_device_id.to_lowercase());
-    let port: u16 = 8080;
     let instance_name = room_name.to_string();
 
     println!("Creating ServiceInfo with the following parameters:");
