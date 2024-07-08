@@ -85,7 +85,7 @@ pub fn broadcast_service(
 
     println!("Selected IP address: {}", ip_address);
 
-    // Convert IP adress to a slice
+    // Convert IP address to a slice
     let ip_addresses = vec![ip_address];
 
     // Create ServiceInfo Object

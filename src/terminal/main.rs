@@ -3,6 +3,7 @@
 // ============================================
 use std::io;
 use std::io::Write;
+use rand::Rng;
 #[allow(unused_imports)]
 use wt_tools::audio;
 use wt_tools::communication::WebRTCModule;
@@ -64,8 +65,10 @@ async fn main() -> std::io::Result<()> {
                         },
                     },
                 });
+                
                 // Save info to database
 
+                //Convert the metadata into a hashmap
                 let metadata_map = metadata::json_to_metadata(&metadata.to_string());
                 let (_, ip_address) = discovery::broadcast_service(
                     mdns.clone(),
@@ -78,7 +81,14 @@ async fn main() -> std::io::Result<()> {
                 let websocket_stream_clone = websocket_stream.clone();
                 let mut webrtc_module_clone = webrtc_module.clone();
                 let creator_device_id_clone = creator_device_id.clone();
-                let addr = format!("{}:8080", ip_address); // Use the selected network interface here
+
+                // Generate random port number
+                fn generate_port_number() -> u16 {
+                    let mut rng = rand::thread_rng();
+                    rng.gen_range(0..=65535)
+                }
+                let port = generate_port_number();
+                let addr = format!("{}:{}", ip_address, port); // Use the selected network interface here
 
                 let room_task = tokio::spawn(async move {
                     websocket_stream_clone.start(&addr).await;
