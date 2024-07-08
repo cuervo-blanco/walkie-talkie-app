@@ -216,7 +216,7 @@ pub fn discover_services() -> Result<Receiver<mdns_sd::ServiceEvent>, Box<dyn st
     let responder = start_mdns_responder()?;
     let (sender, receiver) = mpsc::channel();
 
-    let service_discovery_webrtc = responder.browse("_webrtc.udp.local.").unwrap();
+    let service_discovery_webrtc = responder.browse("_webrtc._udp.local.").unwrap();
     let service_discovery_websocket = responder.browse("_ws._tcp.local.").unwrap();
 
     std::thread::spawn(move || {
