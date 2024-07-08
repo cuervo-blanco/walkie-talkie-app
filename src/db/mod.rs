@@ -101,4 +101,27 @@ pub fn load_rooms(pool: &SqlitePool) -> Vec<discovery::Room> {
     }
     rooms
 }
+pub fn get_room_metadata(
+    pool: &SqlitePool, 
+    ws_url: &str
+    ) -> Result<HashMap<String, serde_json::Value>> {
+        let conn = pool.get().expect("Failed to get connection from pool");
 
+        // Extract the room name from the ws_url
+        let url_parts: Vec<&str> = ws_url.split("/").collect();
+        let room_name = url_parts.last().unwrap_or(&"");
+
+        let mut stmt = conn.prepare("SELECT metadata FROM rooms WHERE name = ?1")?;
+        let metadata: Result<String, rusqlite::Error> = stmt.query_row(
+            params![room_name], |row| row.get(0));
+
+        match metadata {
+            Ok(metadata_str) => {
+                let metadata_map: HashMap<String, serde_json::Value> = serde_json::from_str(&metadata_str)
+                    .expect("Failed to deserialize metadata");
+                Ok(metadata_map)
+            },
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(HashMap::new()),
+            Err(e) => Err(e),
+        }
+}

@@ -141,7 +141,7 @@ fn get_local_ip_address() -> Option<IpAddr> {
     None
 }
 
-fn select_network_interface() -> Option<IpAddr> {
+pub fn select_network_interface() -> Option<IpAddr> {
     let ifaces = get_if_addrs().ok()?;
     let non_loopback_ifaces: Vec<_> = ifaces
         .into_iter()
@@ -212,7 +212,7 @@ pub fn load_and_broadcast_services(pool: &db::SqlitePool)
 // ============================================
 //            Discover Services
 // ============================================
-pub fn discover_services() -> Result<Receiver<mdns_sd::ServiceEvent>, Box<dyn std::error::Error>> {
+pub fn discover_services(selected_ip: IpAddr) -> Result<Receiver<mdns_sd::ServiceEvent>, Box<dyn std::error::Error>> {
     let responder = start_mdns_responder()?;
     let (sender, receiver) = mpsc::channel();
 
@@ -223,16 +223,30 @@ pub fn discover_services() -> Result<Receiver<mdns_sd::ServiceEvent>, Box<dyn st
         loop {
             match service_discovery_webrtc.recv() {
                 Ok(event) => {
-                    if sender.send(event).is_err() {
-                        break;
+                    if let ServiceEvent::ServiceResolved(info) = event {
+                        let addresses = info.get_addresses();
+                        if addresses.iter().any(|&addr| addr == selected_ip) {
+                            if sender.send(ServiceEvent::ServiceResolved(info)).is_err() {
+                                break;
+                            } else {
+                                eprintln!("No addresses found for the resolved service.");
+                            }
+                        }
                     }
                 },
                 Err(_) => break,
             }
             match service_discovery_websocket.recv() {
                 Ok(event) => {
-                    if sender.send(event).is_err() {
-                        break;
+                    if let ServiceEvent::ServiceResolved(info) = event {
+                        let addresses = info.get_addresses();
+                        if addresses.iter().any(|&addr| addr == selected_ip) {
+                            if sender.send(ServiceEvent::ServiceResolved(info)).is_err() {
+                                break;
+                            } else {
+                                eprintln!("No addresses found for the resolved service.");
+                            }
+                        }
                     }
                 },
                 Err(_) => break,
@@ -256,6 +270,8 @@ pub fn get_available_rooms(receiver: Receiver<ServiceEvent>) -> Vec<Room> {
                     creator_device_id: info.get_property("creator_device_id").unwrap().to_string(),
                     metadata: txt_metadata_to_hashmap(info.get_properties()),
                 });
+            } else {
+                eprintln!("No addresses found for the resolved service");
             }
         }
     }
@@ -284,3 +300,4 @@ fn txt_metadata_to_hashmap(txt_properties: &TxtProperties) -> HashMap<String, se
     }
     map
 }
+

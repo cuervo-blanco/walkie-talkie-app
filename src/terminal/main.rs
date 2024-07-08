@@ -7,10 +7,12 @@ use rand::Rng;
 #[allow(unused_imports)]
 use wt_tools::audio;
 use wt_tools::communication::WebRTCModule;
+use wt_tools::communication;
 use wt_tools::discovery;
 use wt_tools::db;
 use wt_tools::log;
 use wt_tools::metadata;
+use wt_tools::websocket;
 use wt_tools::websocket::WebSocketStream;
 use dialoguer::{theme::ColorfulTheme, Select};
 use tokio;
@@ -113,7 +115,8 @@ async fn main() -> std::io::Result<()> {
                 // ============================================
                 //          Discover Rooms
                 // ============================================
-                let receiver = discovery::discover_services().unwrap();
+                let selected_ip = discovery::select_network_interface().unwrap();
+                let receiver = discovery::discover_services(selected_ip).unwrap();
                 let rooms = discovery::get_available_rooms(receiver);
                 display_rooms_to_user(&rooms);
             }
@@ -121,33 +124,7 @@ async fn main() -> std::io::Result<()> {
                 // ============================================
                 //          Join Room
                 // ============================================
-                let receiver = discovery::discover_services().unwrap();
-                let rooms = discovery::get_available_rooms(receiver);
-                let mut items: Vec<String> = Vec::new();
-                for room in rooms.clone() {
-                    items.push(room.name);
-                }
-
-                let selection = Select::with_theme(&ColorfulTheme::default())
-                    .with_prompt("Select a Room: ")
-                    .default(0)
-                    .items(&items[..])
-                    .interact()
-                    .unwrap();
-                if selection > 0 && selection <= rooms.len() {
-                    let room = &rooms[selection - 1];
-                    let metadata = serde_json::json!(room.metadata).clone();
-                    let metadata_map = metadata::json_to_metadata(&metadata.to_string());
-                    start_network_services(
-                        &websocket_stream,
-                        &webrtc_module,
-                        &room.creator_device_id,
-                        room.port,
-                        metadata_map,
-                    ).await;
-                } else {
-                    println!("Invalid room");
-                }
+                join_room(&websocket_stream, &webrtc_module, &pool).await;
             }
             3 => {
                 // ============================================
@@ -244,8 +221,7 @@ fn get_input(prompt: &str) -> String {
 async fn start_network_services(
     websocket_stream: &WebSocketStream,
     webrtc_module: &WebRTCModule,
-    device_id: &str,
-    port: u16,
+    ws_url: &str,
     metadata: std::collections::HashMap<String, serde_json::Value>,
 ) {
     let mut initial_groups: Vec<String> = Vec::new();
@@ -257,12 +233,14 @@ async fn start_network_services(
         }
     }
 
+    let device_id = get_input("Enter your username: ");
+
     let mut webrtc_module = webrtc_module.clone();
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = ws_url.replace("ws://","");
     websocket_stream.start(&addr).await;
     webrtc_module.signaling_loop(
-        &format!("ws://0.0.0.0:{}", port), 
-        device_id, 
+        ws_url,
+        &device_id, 
         initial_groups).await.unwrap();
 }
 // ============================================
@@ -318,5 +296,22 @@ async fn room_menu() {
             }
         }
     }
+}
+
+async fn join_room(
+    websocket_stream: &websocket::WebSocketStream,
+    webrtc_module: &communication::WebRTCModule,
+    pool: &db::SqlitePool
+) {
+    let ws_url = get_input("Enter the WebSocket URL (ws://...): ");
+    let metadata = db::get_room_metadata(pool, &ws_url).unwrap_or_default();
+
+    start_network_services(
+        websocket_stream,
+        webrtc_module,
+        &ws_url,
+        metadata,
+    ).await;
+
 }
 

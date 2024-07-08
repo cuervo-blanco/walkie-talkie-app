@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 pub fn json_to_metadata(json_str: &str) -> HashMap<String, serde_json::Value> {
-    serde_json::from_str(json_str).unwrap_or_default()
+    serde_json::from_str(json_str).unwrap_or_else(|_| HashMap::new())
 }
 
 pub fn metadata_to_json(metadata: &HashMap<String, serde_json::Value>) -> String {
