@@ -145,11 +145,7 @@ async fn main() -> std::io::Result<()> {
 //          Title Card Function
 // ============================================
 async fn title_card() {
-    println!("");
-    sleep(Duration::from_millis(100)).await;
-    println!("");
-    sleep(Duration::from_millis(100)).await;
-    println!("");
+    repeat_println("", 3, 100).await;
     sleep(Duration::from_millis(100)).await;
     println!("██╗    ██╗ █████╗ ██╗     ██╗  ██╗██╗███████╗    ████████╗ █████╗ ██╗     ██╗  ██╗██╗███████╗");
     sleep(Duration::from_millis(100)).await;
